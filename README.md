@@ -1,6 +1,6 @@
 # Chatbot Multi-Agente — Asistente de Ventas para Franquiciados
 
-A multi-agent AI chatbot for franchise sales analysis. Built with FastAPI and Claude (Anthropic), it connects to Microsoft Fabric Warehouse to query sales data via stored procedures, loads results into SQLite in-memory, and uses Text-to-SQL to answer natural language questions in Spanish.
+Chatbot multi-agente para análisis de ventas de franquiciados. Construido con FastAPI y Claude (Anthropic), se conecta a Microsoft Fabric Warehouse para consultar datos de ventas mediante stored procedures, los carga en SQLite en memoria y usa Text-to-SQL para responder preguntas en lenguaje natural.
 
 ## Arquitectura
 

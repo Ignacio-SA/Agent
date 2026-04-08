@@ -58,3 +58,10 @@ logs/
 
 # Virtual environment
 .venv/
+
+# Pylance type stubs (generado automáticamente por VS Code)
+.stubs/
+
+# VS Code virtual filesystem cache
+.vfscache/
+.vfsmeta/
