@@ -129,23 +129,51 @@ IMPORTANTE — aplica estas reglas de negocio al interpretar y presentar los dat
         )
         return response.content[0].text
 
+    def _extract_date_range(self, user_message: str) -> tuple[datetime | None, datetime | None]:
+        """Extrae el rango de fechas del mensaje para pasarlo al SP."""
+        now = datetime.now()
+        today = now.date()
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=60,
+            system=f"""Hoy es {today}. Extrae el rango de fechas del mensaje.
+Responde SOLO con JSON: {{"date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD"}}
+Si no hay fecha específica responde: {{"date_from": null, "date_to": null}}""",
+            messages=[{"role": "user", "content": user_message}],
+        )
+
+        import json
+        try:
+            text = response.content[0].text.strip()
+            start = text.find("{")
+            data = json.loads(text[start:text.rfind("}") + 1])
+            date_from = datetime.strptime(data["date_from"], "%Y-%m-%d") if data.get("date_from") else None
+            date_to = datetime.strptime(data["date_to"] + " 23:59:59", "%Y-%m-%d %H:%M:%S") if data.get("date_to") else None
+            return date_from, date_to
+        except Exception:
+            return None, None
+
     def process_data_request(self, user_message: str, franchise_code: str, context: str = "") -> str:
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # 1. Obtener datos del SP
-        sales = sales_repo.get_sales(franchise_code)
+        # 1. Extraer rango de fechas del mensaje para filtrar en el SP
+        date_from, date_to = self._extract_date_range(user_message)
 
-        # 2. Cargar en SQLite en memoria
+        # 2. Obtener datos del SP (solo el rango necesario)
+        sales = sales_repo.get_sales(franchise_code, date_from=date_from, date_to=date_to)
+
+        # 3. Cargar en SQLite en memoria
         mem_conn = self._load_into_memory(sales)
 
-        # 3. LLM genera SQL
+        # 4. LLM genera SQL
         sql = self._generate_sql(user_message, len(sales), today)
 
-        # 4. Ejecutar SQL
+        # 5. Ejecutar SQL
         columns, rows = self._execute_sql(mem_conn, sql)
         mem_conn.close()
 
-        # 5. LLM formatea la respuesta
+        # 6. LLM formatea la respuesta
         return self._format_response(user_message, sql, columns, rows)
 
 
