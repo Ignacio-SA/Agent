@@ -10,14 +10,17 @@ Cliente (UI Web / API)
 FastAPI Gateway
     ↓
 Orchestrator Agent (Claude Sonnet — decide qué agente responde)
-    ├→ Data Agent      (Haiku — Text-to-SQL sobre datos de ventas)
-    ├→ Interaction Agent (Haiku — conversación general)
-    └→ Memory Agent    (Haiku — resumen y contexto de sesión)
+    ├→ Data Agent        (Haiku — Text-to-SQL sobre datos de ventas)
+    ├→ Interaction Agent (Haiku — conversación básica del negocio)
+    ├→ off_topic         (respuesta fija sin LLM — 0 tokens)
+    └→ Memory Agent      (Haiku — resumen y contexto de sesión)
     ↓
 Microsoft Fabric Warehouse  →  sp_GetSalesForChatbot
     ↓
 SQLite en memoria (Text-to-SQL)     SQLite local (memoria de sesiones)
 ```
+
+> Para la documentación completa de arquitectura, componentes y decisiones de diseño ver [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Flujo del Data Agent (Text-to-SQL)
 1. Ejecuta `sp_GetSalesForChatbot` en Fabric Warehouse con el `FranchiseCode` del usuario
@@ -148,12 +151,13 @@ Agent/
 │   ├── config.py                # Variables de entorno
 │   └── main.py                  # App FastAPI
 ├── context/
-│   └── business_rules.md        # Reglas de negocio para el agente
+│   └── business_rules.md        # Reglas de negocio (leídas en runtime)
 ├── sql/
 │   └── sp_GetSalesForChatbot.sql
 ├── ui_test/
 │   └── index.html               # UI web de prueba
 ├── validate_setup.py            # Valida conexión y configuración
+├── ARCHITECTURE.md              # Documentación completa de arquitectura
 ├── .env.example
 ├── requirements.txt
 └── README.md
@@ -172,7 +176,16 @@ Para agregar una nueva regla de negocio, editar `context/business_rules.md` — 
 ## Agentes
 
 ### Orchestrator (Claude Sonnet)
-Analiza el mensaje y decide si derivar a `data` (consultas de ventas) o `interaction` (conversación general). Usa palabras clave como fallback si el LLM no responde en formato JSON válido.
+Clasifica cada mensaje en uno de cuatro tipos:
+
+| Tipo | Descripción | Costo |
+|---|---|---|
+| `data` | Consultas de ventas, productos, precios, reportes | Alto (3 LLM calls) |
+| `interaction` | Saludos, preguntas sobre el chatbot | Bajo (1 LLM call, 200 tokens) |
+| `off_topic` | Programación, clima, traducciones, etc. | Cero (respuesta fija) |
+| `memory` | "¿Qué hablamos antes?" | Mínimo (solo lectura DB) |
+
+Usa palabras clave como fallback si el LLM no responde en formato JSON válido. El default de fallback es `off_topic` (no `interaction`) para evitar gastar tokens en mensajes irrelevantes.
 
 ### Data Agent (Claude Haiku)
 1. Llama al SP con el `franchise_id` del usuario
@@ -181,7 +194,7 @@ Analiza el mensaje y decide si derivar a `data` (consultas de ventas) o `interac
 4. Ejecuta el SQL y formatea la respuesta en lenguaje natural
 
 ### Interaction Agent (Claude Haiku)
-Responde consultas generales de conversación. No inventa información sobre el negocio — si no sabe algo, sugiere consultar con el administrador.
+Responde únicamente saludos y preguntas sobre el uso del chatbot (`max_tokens=200`). Si el mensaje no está relacionado con ventas o el negocio, devuelve una respuesta corta fija sin gastar tokens adicionales. El filtrado real de mensajes off-topic ocurre en el Orchestrator antes de llegar a este agente.
 
 ### Memory Agent (Claude Haiku)
 Genera resúmenes de la conversación y los persiste en SQLite local. El contexto se recupera al inicio de cada sesión.

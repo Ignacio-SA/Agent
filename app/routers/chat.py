@@ -33,6 +33,8 @@ async def chat(request: ChatRequest):
             response_text = data_agent.process_data_request(request.message, request.franchise_id, memory_context)
         elif agent_type == "memory":
             response_text = f"Recordando: {memory_context}"
+        elif agent_type == "off_topic":
+            response_text = "Solo puedo ayudarte con consultas de ventas o datos del negocio. Consultá con el administrador para otros temas."
         else:  # interaction
             response_text = interaction_agent.respond(request.message, memory_context)
 

@@ -15,16 +15,15 @@ class OrchestratorAgent:
         Claude Sonnet decide cuál sub-agente activar
         Retorna: {agent_type, reasoning, params}
         """
-        system_prompt = """Eres un orquestador de agentes. Analiza el mensaje del usuario
-y decide qué agente debe responder:
+        system_prompt = """Eres un orquestador de un chatbot de ventas para franquiciados. Clasifica el mensaje:
 
-1. "data" - Si el mensaje menciona ventas, productos, artículos, reportes, cantidades, precios, turnos, POS, franquicia, o cualquier dato de negocio. PRIORIDAD ALTA.
-2. "interaction" - Solo para conversación puramente general sin ninguna mención de datos o ventas.
-3. "memory" - Solo si el usuario pide explícitamente recordar algo de conversaciones anteriores.
+1. "data" — consultas de ventas, productos, artículos, precios, turnos, POS, reportes, métricas del negocio.
+2. "interaction" — saludos, preguntas sobre cómo usar el chatbot, conversación mínima relacionada con el negocio.
+3. "off_topic" — todo lo demás: programación, clima, traducción, noticias, matemáticas, temas sin relación con el negocio.
 
-IMPORTANTE: Si el mensaje mezcla saludo con consulta de ventas, usar "data".
+Si hay duda entre "data" e "interaction", usar "data".
 
-Responde SIEMPRE en JSON con: {"agent_type": "", "reasoning": "", "should_use_memory": bool}"""
+Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory": bool}"""
 
         context = f"Contexto de memoria: {memory_context}" if memory_context else ""
 
@@ -48,11 +47,14 @@ Responde SIEMPRE en JSON con: {"agent_type": "", "reasoning": "", "should_use_me
         # Fallback por palabras clave si el LLM no retorna JSON válido
         keywords_data = ["venta", "ventas", "producto", "artículo", "reporte", "turno",
                          "pos", "cantidad", "precio", "franquicia", "ingreso", "ticket"]
+        keywords_interaction = ["hola", "gracias", "ayuda", "cómo funciona", "que puedes hacer"]
         msg_lower = user_message.lower()
         if any(k in msg_lower for k in keywords_data):
             return {"agent_type": "data", "reasoning": "keyword fallback", "should_use_memory": False}
+        if any(k in msg_lower for k in keywords_interaction):
+            return {"agent_type": "interaction", "reasoning": "keyword fallback", "should_use_memory": False}
 
-        return {"agent_type": "interaction", "reasoning": "Default fallback", "should_use_memory": False}
+        return {"agent_type": "off_topic", "reasoning": "Default fallback", "should_use_memory": False}
 
 
 orchestrator = OrchestratorAgent()
