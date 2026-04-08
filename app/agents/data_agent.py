@@ -1,10 +1,23 @@
+import os
+import re
 import sqlite3
-from datetime import datetime
+import struct
+from datetime import datetime, timedelta, timezone
 
 from anthropic import Anthropic
 
 from ..config import settings
 from ..db.sales_repo import sales_repo
+
+_RULES_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "context", "business_rules.md")
+
+
+def _load_business_rules() -> str:
+    try:
+        with open(_RULES_PATH, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
 
 
 class DataAgent:
@@ -26,42 +39,47 @@ class DataAgent:
             return conn
 
         columns = list(sales[0].keys())
-        cols_def = ", ".join([f"{c} TEXT" for c in columns])
+        cols_def = ", ".join([f'"{c}" TEXT' for c in columns])
         conn.execute(f"CREATE TABLE ventas ({cols_def})")
+
+        def fmt(v):
+            if v is None:
+                return None
+            # DATETIMEOFFSET llega como bytes raw del ODBC driver (20 bytes)
+            # Formato: year(h) month(H) day(H) hour(H) minute(H) second(H) fraction_ns(I) tz_h(h) tz_m(h)
+            if isinstance(v, (bytes, bytearray)) and len(v) == 20:
+                year, month, day, hour, minute, second, fraction, tz_h, tz_m = struct.unpack('<hHHHHHIhh', v)
+                microsecond = fraction // 1000
+                tz = timezone(timedelta(hours=tz_h, minutes=tz_m))
+                dt = datetime(year, month, day, hour, minute, second, microsecond, tzinfo=tz)
+                # Guardar en hora local (ya viene en -03:00 gracias a SWITCHOFFSET)
+                return dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+            if hasattr(v, "strftime"):
+                return v.strftime("%Y-%m-%d %H:%M:%S.%f")
+            # Limpiar timezone offset de strings
+            return re.sub(r'\s*[+-]\d{2}:\d{2}$', '', str(v))
 
         placeholders = ", ".join(["?" for _ in columns])
         for row in sales:
             conn.execute(
                 f"INSERT INTO ventas VALUES ({placeholders})",
-                [str(v) if v is not None else None for v in row.values()],
+                [fmt(v) for v in row.values()],
             )
         conn.commit()
         return conn
 
     def _generate_sql(self, user_message: str, total_rows: int, today: str) -> str:
         """LLM genera el SQL apropiado para la pregunta del usuario."""
+        business_rules = _load_business_rules()
         response = self.client.messages.create(
             model=self.model,
             max_tokens=300,
             system=f"""Eres un experto en SQL. Genera UNA sola consulta SQL para responder la pregunta del usuario.
 
-La tabla se llama 'ventas' y tiene estas columnas:
-- id: identificador de la venta
-- FranchiseeCode: código del franquiciado
-- ShiftCode: código de turno
-- PosCode: código del punto de venta (POS)
-- UserName: nombre del vendedor
-- SaleDateTimeUtc: fecha y hora de la venta (texto ISO)
-- Quantity: cantidad vendida
-- ArticleId: código del artículo
-- ArticleDescription: descripción del artículo
-- TypeDetail: tipo de detalle
-- UnitPriceFix: precio unitario
-
 Total de registros en la tabla: {total_rows}
 Fecha de hoy: {today}
 
-Reglas IMPORTANTES:
+Reglas IMPORTANTES de SQL (SQLite):
 - Responde SOLO con la consulta SQL, sin explicaciones ni markdown ni bloques de código
 - La base de datos es SQLite — usa SOLO funciones SQLite:
   * Para año: strftime('%Y', SaleDateTimeUtc)
@@ -70,8 +88,12 @@ Reglas IMPORTANTES:
   * Para fecha: DATE(SaleDateTimeUtc)
   * NUNCA uses YEAR(), MONTH(), DATEPART() — no existen en SQLite
 - Para "hoy" usa: DATE(SaleDateTimeUtc) = '{datetime.now().strftime("%Y-%m-%d")}'
+- Para "ayer" usa: DATE(SaleDateTimeUtc) = date('{datetime.now().strftime("%Y-%m-%d")}', '-1 day')
 - Para totales usa COUNT o SUM según corresponda
 - Limita resultados con LIMIT 50 si es un detalle
+
+---
+{business_rules}
 """,
             messages=[{"role": "user", "content": user_message}],
         )
@@ -89,12 +111,17 @@ Reglas IMPORTANTES:
 
     def _format_response(self, user_message: str, sql: str, columns: list, rows: list) -> str:
         """LLM formatea los resultados en lenguaje natural."""
+        business_rules = _load_business_rules()
         results_text = f"Columnas: {columns}\nResultados ({len(rows)} filas): {rows[:30]}"
 
         response = self.client.messages.create(
             model=self.model,
             max_tokens=800,
-            system="Eres un asistente de ventas. Presenta los resultados de forma clara y estructurada en español. Usa formato markdown con tablas o listas cuando sea útil.",
+            system=f"""Eres un asistente de ventas. Presenta los resultados de forma clara y estructurada en español. Usa formato markdown con tablas o listas cuando sea útil.
+
+IMPORTANTE — aplica estas reglas de negocio al interpretar y presentar los datos:
+
+{business_rules}""",
             messages=[{
                 "role": "user",
                 "content": f"Pregunta: {user_message}\nSQL ejecutado: {sql}\n{results_text}"

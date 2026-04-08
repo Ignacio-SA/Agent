@@ -12,7 +12,7 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def init_memory_db():
-    """Crea la tabla si no existe. Se llama al iniciar la app."""
+    """Crea las tablas si no existen. Se llama al iniciar la app."""
     with _get_conn() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS chatbot_memory (
@@ -25,6 +25,17 @@ def init_memory_db():
                 updated_at TEXT    NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT    NOT NULL,
+                role       TEXT    NOT NULL,
+                content    TEXT    NOT NULL,
+                agent_type TEXT,
+                created_at TEXT    NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id)")
         conn.commit()
 
 
@@ -85,13 +96,39 @@ class MemoryRepository:
             return cursor.rowcount > 0
 
     @staticmethod
+    def list_all() -> list[dict]:
+        with _get_conn() as conn:
+            rows = conn.execute(
+                "SELECT session_id, user_id, summary, created_at, updated_at FROM chatbot_memory ORDER BY updated_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
     def delete(session_id: str) -> bool:
         with _get_conn() as conn:
-            cursor = conn.execute(
-                "DELETE FROM chatbot_memory WHERE session_id = ?", (session_id,)
-            )
+            conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            cursor = conn.execute("DELETE FROM chatbot_memory WHERE session_id = ?", (session_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    @staticmethod
+    def save_message(session_id: str, role: str, content: str, agent_type: str = None):
+        now = datetime.now().isoformat()
+        with _get_conn() as conn:
+            conn.execute(
+                "INSERT INTO chat_messages (session_id, role, content, agent_type, created_at) VALUES (?, ?, ?, ?, ?)",
+                (session_id, role, content, agent_type, now),
+            )
+            conn.commit()
+
+    @staticmethod
+    def get_messages(session_id: str) -> list[dict]:
+        with _get_conn() as conn:
+            rows = conn.execute(
+                "SELECT role, content, agent_type, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC",
+                (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
 
 memory_repo = MemoryRepository()

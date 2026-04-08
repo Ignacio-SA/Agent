@@ -2,6 +2,7 @@ import traceback
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 from ..agents.data_agent import data_agent
 from ..agents.interaction import interaction_agent
@@ -35,7 +36,12 @@ async def chat(request: ChatRequest):
         else:  # interaction
             response_text = interaction_agent.respond(request.message, memory_context)
 
-        # Guardar memoria con la conversación actual
+        # Guardar mensajes individuales
+        from ..db.memory_repo import memory_repo as repo
+        repo.save_message(request.session_id, "user", request.message)
+        repo.save_message(request.session_id, "assistant", response_text, agent_type)
+
+        # Guardar memoria/resumen
         conversation = [
             {"role": "user", "content": request.message},
             {"role": "assistant", "content": response_text},
@@ -52,6 +58,41 @@ async def chat(request: ChatRequest):
 
     except Exception as e:
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sessions/")
+async def list_sessions():
+    """GET /chat/sessions/ - Lista todas las sesiones guardadas"""
+    try:
+        from ..db.memory_repo import memory_repo as repo
+        return repo.list_all()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """GET /chat/sessions/{session_id}/messages - Historial completo de mensajes"""
+    try:
+        from ..db.memory_repo import memory_repo as repo
+        return repo.get_messages(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """DELETE /chat/sessions/{session_id} - Elimina una sesión y sus mensajes"""
+    try:
+        from ..db.memory_repo import memory_repo as repo
+        deleted = repo.delete(session_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Sesión no encontrada")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
