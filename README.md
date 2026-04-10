@@ -23,15 +23,18 @@ SQLite en memoria (Text-to-SQL)     SQLite local (memoria de sesiones)
 > Para la documentación completa de arquitectura, componentes y decisiones de diseño ver [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Flujo del Data Agent (Text-to-SQL)
-1. Ejecuta `sp_GetSalesForChatbot` en Fabric Warehouse con el `FranchiseCode` del usuario
-2. Carga los resultados en una tabla `ventas` SQLite en memoria
-3. El LLM genera una consulta SQLite a partir del lenguaje natural del usuario
-4. Ejecuta el SQL y formatea la respuesta en español
+1. Extrae el rango de fechas del mensaje con el LLM (`temperature=0`)
+2. Ejecuta `sp_GetSalesForChatbot` en Fabric Warehouse con el `FranchiseCode` y rango de fechas
+3. Carga los resultados en una tabla `ventas` SQLite en memoria
+4. El LLM genera una consulta SQLite a partir del lenguaje natural (`temperature=0`)
+5. Ejecuta el SQL
+6. Calcula métricas clave en Python (transacciones únicas, totales, por vendedor, top productos, horas activas) — sin LLM
+7. Formatea la respuesta en español usando los datos pre-calculados
 
 ## Requisitos
 
 - Python 3.12
-- Microsoft Fabric Warehouse (con ODBC Driver 17 for SQL Server)
+- Microsoft Fabric Warehouse (con ODBC Driver 18 for SQL Server)
 - Cuenta Anthropic con acceso a Claude Sonnet y Haiku
 - Azure AD con permisos de lectura sobre el Warehouse
 
@@ -167,7 +170,7 @@ Agent/
 
 El agente lee este archivo en cada consulta. Contiene:
 - Descripción de columnas de la tabla `ventas`
-- Regla del campo `Type`: `1` = ítem unitario, `2` = cabecera de promoción (excluir de totales)
+- Regla del campo `Type`: `0` = venta regular, `1` = ítem dentro de promoción, `2` = cabecera de promoción (excluir de totales con `Type != '2'`)
 - Reglas de presentación: no mostrar información técnica al usuario
 - Reglas de búsqueda: siempre usar `LOWER(...) LIKE LOWER('%texto%')` para nombres de artículos
 
@@ -188,10 +191,12 @@ Clasifica cada mensaje en uno de cuatro tipos:
 Usa palabras clave como fallback si el LLM no responde en formato JSON válido. El default de fallback es `off_topic` (no `interaction`) para evitar gastar tokens en mensajes irrelevantes.
 
 ### Data Agent (Claude Haiku)
-1. Llama al SP con el `franchise_id` del usuario
+1. Llama al SP con el `franchise_id` y rango de fechas extraído del mensaje
 2. Carga los datos en SQLite en memoria (decodificando `DATETIMEOFFSET` binario de pyodbc)
-3. Genera SQL SQLite con el LLM (usando las reglas de negocio como contexto)
-4. Ejecuta el SQL y formatea la respuesta en lenguaje natural
+3. Genera SQL SQLite con el LLM (`temperature=0`, usando las reglas de negocio como contexto)
+4. Ejecuta el SQL
+5. Calcula métricas de resumen en Python (sin LLM): transacciones únicas por `COUNT(DISTINCT id)`, totales, desglose por vendedor, top productos y franjas horarias
+6. Formatea la respuesta usando los números pre-calculados — el LLM solo presenta, no recalcula
 
 ### Interaction Agent (Claude Haiku)
 Responde únicamente saludos y preguntas sobre el uso del chatbot (`max_tokens=200`). Si el mensaje no está relacionado con ventas o el negocio, devuelve una respuesta corta fija sin gastar tokens adicionales. El filtrado real de mensajes off-topic ocurre en el Orchestrator antes de llegar a este agente.
@@ -217,3 +222,11 @@ Genera resúmenes de la conversación y los persiste en SQLite local. El context
 **No aparece información de ventas**
 - Validar setup: `python validate_setup.py`
 - Verificar que `franchise_id` en el UI corresponde a `FranchiseCode` en Fabric (no `FranchiseeCode`)
+
+**Error de ODBC Driver**
+- Verificar que el ODBC Driver 18 for SQL Server está instalado: `Get-OdbcDriver | Select-Object Name` en PowerShell
+- Descargar desde: https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server
+
+**Resultados inconsistentes entre consultas idénticas**
+- Asegurarse de que los tres llamados LLM del Data Agent usan `temperature=0`
+- Los conteos de transacciones se calculan con `COUNT(DISTINCT id)` en Python, no por el LLM

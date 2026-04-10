@@ -26,7 +26,7 @@ class DatabaseConnection:
     def __init__(self):
         self.mode = settings.db_auth_mode.lower()
         self.base_string = (
-            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"DRIVER={{ODBC Driver 18 for SQL Server}};"
             f"SERVER={settings.db_server};"
             f"DATABASE={settings.db_database};"
         )

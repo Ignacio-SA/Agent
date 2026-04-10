@@ -74,6 +74,7 @@ class DataAgent:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=300,
+            temperature=0,
             system=f"""Eres un experto en SQL. Genera UNA sola consulta SQL para responder la pregunta del usuario.
 
 Total de registros en la tabla: {total_rows}
@@ -90,7 +91,7 @@ Reglas IMPORTANTES de SQL (SQLite):
 - Para "hoy" usa: DATE(SaleDateTimeUtc) = '{datetime.now().strftime("%Y-%m-%d")}'
 - Para "ayer" usa: DATE(SaleDateTimeUtc) = date('{datetime.now().strftime("%Y-%m-%d")}', '-1 day')
 - Para totales usa COUNT o SUM según corresponda
-- Limita resultados con LIMIT 50 si es un detalle
+- NO uses LIMIT salvo que el usuario pida explícitamente un "top N" o "los N más..."
 
 ---
 {business_rules}
@@ -109,22 +110,92 @@ Reglas IMPORTANTES de SQL (SQLite):
         except Exception as e:
             return [], [("Error en SQL", str(e))]
 
-    def _format_response(self, user_message: str, sql: str, columns: list, rows: list) -> str:
+    def _compute_summary(self, mem_conn: sqlite3.Connection) -> str:
+        """Calcula todas las métricas en Python (sin LLM) para evitar inconsistencias."""
+        try:
+            totals = mem_conn.execute("""
+                SELECT COUNT(DISTINCT id),
+                       ROUND(SUM(CAST(Quantity AS REAL) * CAST(UnitPriceFix AS REAL)), 2),
+                       COUNT(DISTINCT UserName)
+                FROM ventas WHERE Type != '2'
+            """).fetchone()
+
+            by_vendor = mem_conn.execute("""
+                SELECT UserName,
+                       COUNT(DISTINCT id),
+                       ROUND(SUM(CAST(Quantity AS REAL) * CAST(UnitPriceFix AS REAL)), 2)
+                FROM ventas WHERE Type != '2'
+                GROUP BY UserName ORDER BY 3 DESC
+            """).fetchall()
+
+            top_products = mem_conn.execute("""
+                SELECT ArticleDescription,
+                       SUM(CAST(Quantity AS REAL)),
+                       ROUND(SUM(CAST(Quantity AS REAL) * CAST(UnitPriceFix AS REAL)), 2)
+                FROM ventas WHERE Type != '2'
+                GROUP BY ArticleDescription ORDER BY 2 DESC LIMIT 10
+            """).fetchall()
+
+            hourly = mem_conn.execute("""
+                SELECT strftime('%H', SaleDateTimeUtc),
+                       COUNT(DISTINCT id)
+                FROM ventas WHERE Type != '2'
+                GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+            """).fetchall()
+
+            def fmt(n):
+                return f"${n:,.0f}".replace(",", ".")
+
+            lines = [
+                "=== DATOS PRE-CALCULADOS (usar exactamente estos números) ===",
+                "",
+                f"RESUMEN GENERAL:",
+                f"- Transacciones: {totals[0]}",
+                f"- Total ventas: {fmt(totals[1])}",
+                f"- Vendedores activos: {totals[2]}",
+                "",
+                "POR VENDEDOR:",
+            ]
+            for v in by_vendor:
+                lines.append(f"  • {v[0]}: {v[1]} transacciones | {fmt(v[2])}")
+
+            lines += ["", "TOP PRODUCTOS (por unidades):"]
+            for p in top_products:
+                lines.append(f"  • {p[0]}: {p[1]:.0f} unidades | {fmt(p[2])}")
+
+            lines += ["", "HORAS MÁS ACTIVAS (transacciones únicas):"]
+            for h in hourly:
+                lines.append(f"  • {h[0]}:00 hs — {h[1]} transacciones")
+
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    def _format_response(self, user_message: str, sql: str, columns: list, rows: list, summary: str) -> str:
         """LLM formatea los resultados en lenguaje natural."""
         business_rules = _load_business_rules()
-        results_text = f"Columnas: {columns}\nResultados ({len(rows)} filas): {rows[:30]}"
+
+        # Para respuestas con muchas filas, usar solo los datos pre-calculados
+        if len(rows) > 20:
+            data_content = f"(Datos detallados omitidos — usar solo los datos pre-calculados del sistema)"
+        else:
+            data_content = f"Columnas: {columns}\nResultados: {rows}"
 
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=800,
+            max_tokens=2000,
+            temperature=0,
             system=f"""Eres un asistente de ventas. Presenta los resultados de forma clara y estructurada en español. Usa formato markdown con tablas o listas cuando sea útil.
 
-IMPORTANTE — aplica estas reglas de negocio al interpretar y presentar los datos:
+INSTRUCCIÓN CRÍTICA: Los siguientes datos fueron calculados con precisión en Python. Úsalos EXACTAMENTE como aparecen. NO recalcules ni modifiques ningún número.
 
+{summary}
+
+Reglas de presentación:
 {business_rules}""",
             messages=[{
                 "role": "user",
-                "content": f"Pregunta: {user_message}\nSQL ejecutado: {sql}\n{results_text}"
+                "content": f"Pregunta: {user_message}\n{data_content}"
             }],
         )
         return response.content[0].text
@@ -137,6 +208,7 @@ IMPORTANTE — aplica estas reglas de negocio al interpretar y presentar los dat
         response = self.client.messages.create(
             model=self.model,
             max_tokens=60,
+            temperature=0,
             system=f"""Hoy es {today}. Extrae el rango de fechas del mensaje.
 Responde SOLO con JSON: {{"date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD"}}
 Si no hay fecha específica responde: {{"date_from": null, "date_to": null}}""",
@@ -171,10 +243,13 @@ Si no hay fecha específica responde: {{"date_from": null, "date_to": null}}""",
 
         # 5. Ejecutar SQL
         columns, rows = self._execute_sql(mem_conn, sql)
+
+        # 6. Calcular métricas en Python (sin LLM)
+        summary = self._compute_summary(mem_conn)
         mem_conn.close()
 
-        # 6. LLM formatea la respuesta
-        return self._format_response(user_message, sql, columns, rows)
+        # 7. LLM formatea la respuesta
+        return self._format_response(user_message, sql, columns, rows, summary)
 
 
 data_agent = DataAgent()

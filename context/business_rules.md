@@ -25,8 +25,9 @@ El campo `Type` indica el rol de cada fila dentro de una transacción:
 
 | Valor | Significado                  | Uso en cálculos                                       |
 |-------|------------------------------|-------------------------------------------------------|
-| `1`   | Ítem unitario / precio real  | **INCLUIR** en conteos y sumas de ventas              |
-| `2`   | Cabecera de promoción        | **EXCLUIR** — es el precio de la promo completa, ya está representado por los ítems Type=1 que la componen |
+| `0`   | Venta regular (sin promo)    | **INCLUIR** en conteos y sumas de ventas              |
+| `1`   | Ítem dentro de una promoción | **INCLUIR** en conteos y sumas de ventas              |
+| `2`   | Cabecera de promoción        | **EXCLUIR** — es el precio total de la promo, ya está representado por los ítems Type=1 que la componen |
 
 ### Por qué importa
 Una misma transacción (`id`) puede tener:
@@ -36,7 +37,7 @@ Una misma transacción (`id`) puede tener:
 Si se suma `UnitPriceFix` sin filtrar, el monto de la promo se cuenta **dos veces**.
 
 ### Regla de SQL
-**SIEMPRE** agregar `WHERE Type = '1'` (o `AND Type = '1'`) cuando se calculen:
+**SIEMPRE** agregar `WHERE Type != '2'` (o `AND Type != '2'`) cuando se calculen:
 - Total de ventas (`SUM(UnitPriceFix * Quantity)`)
 - Cantidad de transacciones (`COUNT(DISTINCT id)`)
 - Productos más vendidos (`SUM(Quantity)`)
@@ -46,7 +47,7 @@ Si se suma `UnitPriceFix` sin filtrar, el monto de la promo se cuenta **dos vece
 ```sql
 SELECT ArticleDescription, SUM(CAST(Quantity AS REAL)) AS total_vendido
 FROM ventas
-WHERE Type = '1'
+WHERE Type != '2'
 GROUP BY ArticleDescription
 ORDER BY total_vendido DESC
 LIMIT 10
@@ -55,7 +56,7 @@ LIMIT 10
 **Ejemplo incorrecto (doble conteo):**
 ```sql
 SELECT ArticleDescription, SUM(CAST(Quantity AS REAL)) AS total_vendido
-FROM ventas  -- Sin filtro por Type → cuenta la promo dos veces
+FROM ventas  -- Sin filtro por Type → cuenta la cabecera de promo dos veces
 GROUP BY ArticleDescription
 ```
 
@@ -68,7 +69,7 @@ GROUP BY ArticleDescription
 - Para filtrar por mes usar `strftime('%Y-%m', SaleDateTimeUtc)`.
 - Para filtrar por año usar `strftime('%Y', SaleDateTimeUtc)`.
 - **Nunca** usar `YEAR()`, `MONTH()`, `DATEPART()` — no existen en SQLite.
-- El precio total de una venta es `SUM(UnitPriceFix * Quantity)` filtrando `Type = '1'`.
+- El precio total de una venta es `SUM(UnitPriceFix * Quantity)` filtrando `Type != '2'`.
 - Para buscar artículos por nombre **siempre** usar `LOWER(ArticleDescription) LIKE LOWER('%texto%')` — nunca comparación exacta, el usuario puede escribir en minúsculas y el dato tener mayúsculas.
 - Para franjas horarias usar `strftime('%H', SaleDateTimeUtc)` que devuelve la hora en formato '00'-'23'.
 - Para agrupar por franja horaria: `GROUP BY strftime('%H', SaleDateTimeUtc) ORDER BY COUNT(*) DESC`.
