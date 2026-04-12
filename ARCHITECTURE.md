@@ -9,6 +9,7 @@
 6. [Cómo construirlo desde cero](#6-cómo-construirlo-desde-cero)
 7. [Variables de entorno](#7-variables-de-entorno)
 8. [Decisiones de diseño importantes](#8-decisiones-de-diseño-importantes)
+9. [Sistema de Entrenamiento (Training Mode)](#9-sistema-de-entrenamiento-training-mode)
 
 ---
 
@@ -35,23 +36,26 @@ Agent/
 │   │   ├── orchestrator.py       # Decide qué agente responde cada mensaje
 │   │   ├── data_agent.py         # Consulta y analiza datos de ventas
 │   │   ├── interaction.py        # Responde conversación general del negocio
-│   │   └── memory_agent.py       # Genera y recupera resúmenes de sesión
+│   │   ├── memory_agent.py       # Genera y recupera resúmenes de sesión
+│   │   └── training_agent.py     # Analiza feedback y genera sugerencias de mejora
 │   ├── routers/
 │   │   └── chat.py               # Endpoints HTTP de la API
 │   ├── db/
 │   │   ├── connection.py         # Conexión a Fabric Warehouse (pyodbc + Azure AD)
 │   │   ├── sales_repo.py         # Ejecuta el SP de ventas
-│   │   └── memory_repo.py        # CRUD de sesiones y mensajes (SQLite local)
+│   │   ├── memory_repo.py        # CRUD de sesiones y mensajes (SQLite local)
+│   │   └── training_repo.py      # Singleton TrainingMemory (RAM + disco)
 │   └── models/
 │       ├── schemas.py            # Modelos de request/response (Pydantic)
 │       └── memory.py             # Modelo de la entidad MemoryEntry
 ├── context/
-│   └── business_rules.md         # Reglas de negocio que leen los agentes en runtime
+│   ├── business_rules.md         # Reglas de negocio que leen los agentes en runtime
+│   └── training_log.md           # Log append-only de sugerencias de entrenamiento
 ├── sql/
 │   ├── sp_GetSalesForChatbot.sql  # Stored Procedure en Fabric Warehouse
 │   └── create_chatbot_memory.sql  # Script auxiliar (referencia)
 ├── ui_test/
-│   └── index.html                # UI de prueba (chat + panel de sesiones)
+│   └── index.html                # UI de prueba (chat + panel de sesiones + toggle entrenamiento)
 ├── memory.db                     # SQLite local (se crea automáticamente)
 ├── .env                          # Variables de entorno (NO commitear)
 ├── .env.example                  # Plantilla de variables de entorno
@@ -168,6 +172,35 @@ Responde saludos y preguntas sobre el chatbot. Usa Haiku con `max_tokens=200`. S
 
 ---
 
+### `app/agents/training_agent.py` — El analista de feedback
+
+Agente basado en Claude Haiku que implementa el ciclo de aprendizaje supervisado:
+
+- **`process_feedback()`**: Recibe el `session_id`, el historial de la sesión y el mensaje de feedback del usuario. Analiza el ciclo completo (pregunta → respuesta → feedback) y genera una sugerencia estructurada en JSON.
+- Identifica el **componente afectado** (`data_agent`, `orchestrator`, `interaction`, `business_rules`) y la **causa raíz** del problema o acierto.
+- Guarda la sugerencia en `TrainingMemory` (RAM) y hace append a `context/training_log.md` (disco).
+- En caso de error al parsear el JSON del LLM, genera un fallback manual para no perder el feedback.
+
+> El training_agent **nunca modifica** archivos de código ni `business_rules.md`. Solo escribe en `training_log.md`. Las sugerencias son revisadas por un humano antes de aplicarse.
+
+---
+
+### `app/db/training_repo.py` — TrainingMemory
+
+Singleton con doble storage:
+
+- **RAM** (`self._context: list[dict]`): Últimas 20 sugerencias para inyección inmediata en prompts.
+- **Disco** (`context/training_log.md`): Append-only de todas las sugerencias históricas.
+
+| Método | Cuándo se llama | Qué hace |
+|---|---|---|
+| `load_from_disk()` | Al iniciar la app (`main.py`) | Lee `training_log.md` y carga las últimas 20 en RAM |
+| `add_suggestion(dict)` | Por `training_agent` en cada feedback | Agrega a RAM + append en disco |
+| `get_context_for_prompt()` | Por `orchestrator` si `training_mode=True` | Devuelve string formateado para inyectar en system prompts |
+| `get_recent_entries(n)` | Por `training_agent` al analizar | Provee contexto de sugerencias previas para evitar repetición |
+
+---
+
 ### `app/db/connection.py` — La conexión a Fabric
 
 Soporta tres modos de autenticación configurables via `.env`:
@@ -236,6 +269,8 @@ WHERE h.FranchiseCode = @FranchiseCode
 | Warehouse | Microsoft Fabric | Cloud | Datos de ventas (fuente de verdad) |
 | SQLite en memoria | sqlite3 | RAM del servidor | Tabla temporal por consulta (se destruye al terminar) |
 | SQLite local | sqlite3 | `memory.db` en disco | Sesiones, historial de mensajes |
+| Training Log | Markdown | `context/training_log.md` en disco | Sugerencias de mejora (append-only, revisión humana) |
+| Training Memory | Python list | RAM del servidor | Últimas 20 sugerencias para inyectar en prompts |
 
 ---
 
@@ -363,3 +398,129 @@ Para poder agregar o corregir reglas sin reiniciar el servidor ni hacer un deplo
 ### ¿Por qué el tipo `off_topic` en el Orchestrator?
 
 Para que mensajes fuera de scope (código, clima, traducciones) no consuman tokens de generación. El router responde con texto hardcodeado sin llamar a ningún modelo.
+
+---
+
+## 9. Sistema de Entrenamiento (Training Mode)
+
+### Descripción General
+
+El sistema de entrenamiento permite que el chatbot mejore continuamente a partir del feedback de los usuarios. Funciona como un ciclo de aprendizaje supervisado donde:
+
+1. El usuario hace una **consulta** al chatbot
+2. El chatbot genera una **respuesta** usando sus agentes
+3. El usuario da **feedback** (positivo o negativo) sobre la respuesta
+4. El **training_agent** analiza el ciclo y genera **sugerencias de mejora**
+5. Las sugerencias se almacenan y se inyectan como contexto en futuras respuestas
+
+### Ciclo de Feedback
+
+```
+Usuario pregunta → Agente responde → Usuario da feedback
+                                           │
+                                 Training Agent analiza
+                                           │
+                          ┌────────────────┴──────────────────┐
+                          │                                   │
+                 training_log.md                      TrainingMemory
+                 (disco, append)                      (RAM, inyección)
+                          │                                   │
+                Revisión humana                  Se usa en próximas
+                para aplicar                     respuestas del bot
+```
+
+### Archivos Involucrados
+
+| Archivo | Rol |
+|---------|-----|
+| `app/agents/training_agent.py` | Analiza feedback y genera sugerencias |
+| `app/db/training_repo.py` | Singleton `TrainingMemory` — RAM + disco |
+| `app/agents/orchestrator.py` | Clasifica `feedback` como intent + inyecta contexto |
+| `app/routers/chat.py` | Solicita feedback + rutea al training_agent |
+| `context/training_log.md` | Log persistente de sugerencias (append only) |
+| `app/models/schemas.py` | Campo `training_mode` en `ChatRequest` |
+
+### Formato del training_log.md
+
+Cada entrada tiene este formato:
+
+```markdown
+## [YYYY-MM-DD HH:MM] Sesión: {session_id} | Tipo: {negativo|positivo}
+
+**Chat analizado:**
+- Usuario preguntó: "..."
+- Agente respondió: "..."
+- Feedback recibido: "..."
+
+**Componente afectado:** {data_agent | orchestrator | interaction | business_rules}
+
+**Causa raíz identificada:**
+...
+
+**Sugerencia de cambio:**
+...
+
+**Prioridad:** {alta|media|baja}
+---
+```
+
+- **Tipo `positivo`**: patrón exitoso a mantener
+- **Tipo `negativo`**: problema a corregir
+- **Prioridad `alta`**: datos incorrectos o queries fallidas
+- **Prioridad `media`**: respuestas imprecisas o incompletas
+- **Prioridad `baja`**: preferencias de estilo
+
+### Workflow para Aplicar Sugerencias
+
+1. Revisar `context/training_log.md` periódicamente (semanalmente o cuando haya muchas entradas)
+2. Filtrar por prioridad `alta` primero
+3. Agrupar por componente afectado
+4. **`business_rules`** → agregar o modificar reglas en `context/business_rules.md`
+5. **`data_agent`** → ajustar el prompt del sistema en `_generate_sql()` o `_format_response()`
+6. **`orchestrator`** → refinar las descripciones de clasificación o agregar keywords
+7. **`interaction`** → ajustar el prompt del sistema del agente de interacción
+8. Testear los cambios con los mismos mensajes que generaron el feedback
+9. Marcar como aplicado (opcionalmente agregar `[APLICADO]` al inicio de la entrada)
+
+> **Skill disponible:** usar el skill `apply-training-suggestions` (disponible para Gemini, Claude Code y OpenCode) para procesar sugerencias de forma interactiva con análisis automático del componente afectado y propuesta de diff.
+
+### Inyección de Contexto en Prompts
+
+Cuando `training_mode=True`, el orchestrator inyecta en cada system prompt:
+
+```
+=== CONTEXTO DE ENTRENAMIENTO ACTIVO ===
+Las siguientes son sugerencias de mejora basadas en feedback previo de usuarios.
+Tené en cuenta estos patrones al generar tu respuesta:
+⚠️ CORRECCIÓN (data_agent): Query sin filtro Type → Agregar WHERE Type != '2'
+✅ PATRÓN EXITOSO (business_rules): Formato de hora como "entre las X y X+1 hs"
+```
+
+Límites del sistema:
+- Máximo **20 entradas** en RAM (las más recientes)
+- El contexto inyectado se limita a ~**500 tokens** (prioridad alta/media)
+- Máximo **10 turnos** del historial se pasan al training_agent por análisis
+
+### Deshabilitar Training Mode en Producción
+
+**Opción 1 — Desde el frontend:** desactivar el switch "Modo Entrenamiento" en la UI. Envía `training_mode: false` en cada request.
+
+**Opción 2 — Cambiar el default en el schema:**
+```python
+# app/models/schemas.py
+training_mode: bool = False  # cambiar de True a False
+```
+
+**Opción 3 — Variable de entorno:**
+```env
+TRAINING_MODE_DEFAULT=false
+```
+Y modificar `config.py` para leerla.
+
+### Consideraciones de Seguridad
+
+- El training_agent **NUNCA modifica** archivos de código ni `business_rules.md`
+- Solo escribe en `context/training_log.md` (append mode)
+- Las sugerencias son **revisadas por un humano** antes de aplicarse
+- El contexto en RAM es **efímero** y se reconstruye en cada reinicio de la app
+- Los datos del feedback no se envían a servicios externos más allá de la API de Anthropic
