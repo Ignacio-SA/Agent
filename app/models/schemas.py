@@ -8,6 +8,7 @@ class ChatRequest(BaseModel):
     session_id: str
     franchise_id: str
     user_id: str | None = None
+    training_mode: bool = True
 
 
 class ChatResponse(BaseModel):

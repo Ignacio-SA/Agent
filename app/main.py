@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db.memory_repo import init_memory_db
+from .db.training_repo import training_memory
 from .routers import chat
 
 
@@ -41,6 +42,9 @@ app.add_middleware(
 
 # Inicializar SQLite para memoria local
 init_memory_db()
+
+# Precargar contexto de entrenamiento desde disco
+training_memory.load_from_disk()
 
 # Routers
 app.include_router(chat.router)
