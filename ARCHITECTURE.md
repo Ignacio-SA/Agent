@@ -482,7 +482,22 @@ Cada entrada tiene este formato:
 8. Testear los cambios con los mismos mensajes que generaron el feedback
 9. Marcar como aplicado (opcionalmente agregar `[APLICADO]` al inicio de la entrada)
 
-> **Skill disponible:** usar el skill `apply-training-suggestions` (disponible para Gemini, Claude Code y OpenCode) para procesar sugerencias de forma interactiva con análisis automático del componente afectado y propuesta de diff.
+### Validación Interactiva con el Skill IA
+
+Para agilizar la aplicación del feedback, el proyecto incluye un **Skill de IA** (`apply-training-suggestions`) que automatiza el workflow descrito arriba. 
+
+**¿Qué hace este skill?**
+1. **Carga el contexto:** Lee automáticamente `business_rules.md`, los agentes principales y el `training_log.md`.
+2. **Analiza una a una:** Pasa por cada sugerencia pendiente en el log de entrenamiento.
+3. **Propone un diff:** Basado en el componente afectado (ej: `data_agent`, `business_rules`), propone exactamente qué y dónde cambiar en el código o en las reglas.
+4. **Flujo Interactivo:** Te pregunta sugerencia por sugerencia: `¿Aplicar este cambio? (sí/no/modificar)`.
+5. **Aplica y limpia:** Si aceptás, modifica el archivo pertinente y elimina la entrada del `training_log.md`.
+
+**¿Cómo invocarlo?**
+El skill está disponible en las 3 herramientas:
+*   **Gemini / Antigravity:** Pedir *"aplicá el skill apply_training_suggestions"*
+*   **Claude Code:** Ejecutar `/project:apply-training-suggestions`
+*   **OpenCode:** Seleccionarlo desde el menú interactivo de prompts.
 
 ### Inyección de Contexto en Prompts
 
