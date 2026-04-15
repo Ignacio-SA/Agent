@@ -117,14 +117,14 @@ Reglas IMPORTANTES de SQL (SQLite):
                 SELECT COUNT(DISTINCT id),
                        ROUND(SUM(CAST(Quantity AS REAL) * CAST(UnitPriceFix AS REAL)), 2),
                        COUNT(DISTINCT UserName)
-                FROM ventas WHERE Type != '2'
+                FROM ventas
             """).fetchone()
 
             by_vendor = mem_conn.execute("""
                 SELECT UserName,
                        COUNT(DISTINCT id),
                        ROUND(SUM(CAST(Quantity AS REAL) * CAST(UnitPriceFix AS REAL)), 2)
-                FROM ventas WHERE Type != '2'
+                FROM ventas
                 GROUP BY UserName ORDER BY 3 DESC
             """).fetchall()
 
@@ -132,14 +132,14 @@ Reglas IMPORTANTES de SQL (SQLite):
                 SELECT ArticleDescription,
                        SUM(CAST(Quantity AS REAL)),
                        ROUND(SUM(CAST(Quantity AS REAL) * CAST(UnitPriceFix AS REAL)), 2)
-                FROM ventas WHERE Type != '2'
+                FROM ventas
                 GROUP BY ArticleDescription ORDER BY 2 DESC LIMIT 10
             """).fetchall()
 
             hourly = mem_conn.execute("""
                 SELECT strftime('%H', SaleDateTimeUtc),
                        COUNT(DISTINCT id)
-                FROM ventas WHERE Type != '2'
+                FROM ventas
                 GROUP BY 1 ORDER BY 2 DESC LIMIT 5
             """).fetchall()
 
@@ -226,30 +226,85 @@ Si no hay fecha específica responde: {{"date_from": null, "date_to": null}}""",
         except Exception:
             return None, None
 
+    def _dump_to_local_sql_server(self, sales: list):
+        """Tool de Diagnóstico Definitiva: Impacta batch a localhost\\SQLEXPRESS"""
+        if not sales:
+            return
+        try:
+            import pyodbc
+            connection_string = "Driver={ODBC Driver 17 for SQL Server};Server=localhost\\SQLEXPRESS;Database=BasePruebaMCP;Trusted_Connection=yes;"
+            conn = pyodbc.connect(connection_string, autocommit=True)
+            cursor = conn.cursor()
+            
+            cursor.execute("IF OBJECT_ID('ventas_chatbot_debug', 'U') IS NOT NULL DROP TABLE ventas_chatbot_debug;")
+            columns = list(sales[0].keys())
+            cols_def = ", ".join([f"[{c}] NVARCHAR(MAX)" for c in columns])
+            cursor.execute(f"CREATE TABLE ventas_chatbot_debug ({cols_def});")
+            
+            placeholders = ",".join(["?" for _ in columns])
+            insert_q = f"INSERT INTO ventas_chatbot_debug VALUES ({placeholders})"
+            
+            for row in sales:
+                vals = [str(v) if v is not None else None for v in row.values()]
+                cursor.execute(insert_q, vals)
+                
+            print(f"[DataAgent] DUMPER: {len(sales)} filas impactadas exitosamente en localhost\\SQLEXPRESS -> BasePruebaMCP.dbo.ventas_chatbot_debug")
+            conn.close()
+        except Exception as e:
+            print(f"[DataAgent] Omitiendo Dumper local (ignorado o sin acceso). Razón: {e}")
+
     def process_data_request(self, user_message: str, franchise_code: str, context: str = "") -> str:
         today = datetime.now().strftime("%Y-%m-%d")
+        
+        print("\n[DataAgent] --- INICIO FLUJO TEXT-TO-SQL ---")
 
         # 1. Extraer rango de fechas del mensaje para filtrar en el SP
         date_from, date_to = self._extract_date_range(user_message)
+        print(f"[DataAgent] (Paso 1) Extracción de Fechas/Horarios: {date_from} -> {date_to}")
 
         # 2. Obtener datos del SP (solo el rango necesario)
+        print(f"[DataAgent] (Paso 2) Llamada de consulta al Store Procedure para franquicia '{franchise_code}'...")
         sales = sales_repo.get_sales(franchise_code, date_from=date_from, date_to=date_to)
+        
+        # Si se desea depurar en SSMS local, descomentar:
+        self._dump_to_local_sql_server(sales)
 
         # 3. Cargar en SQLite en memoria
+        print(f"[DataAgent] (Paso 3) Volcando tablas ({len(sales)} filas) hacia SQLite RAM temporal")
+        if sales:
+            print("[DataAgent] Vista previa tabular (primeros 5 renglones exactos de Azure):")
+            keys = list(sales[0].keys())
+            column_widths = {k: min(20, max(len(str(k)), 10)) for k in keys}
+            
+            header = " | ".join([str(k).ljust(column_widths[k])[:column_widths[k]] for k in keys])
+            print(f"   {header}")
+            print(f"   {'-'*len(header)}")
+            
+            for r in sales[:5]:
+                row_str = " | ".join([str(v).ljust(column_widths[k])[:column_widths[k]] for k, v in r.items()])
+                print(f"   {row_str}")
+                
         mem_conn = self._load_into_memory(sales)
 
         # 4. LLM genera SQL
+        print("[DataAgent] (Paso 4) Consultando SQL nativo al modelo...")
         sql = self._generate_sql(user_message, len(sales), today)
+        print(f"[DataAgent] Código generado puro:\n-----\n{sql}\n-----")
 
         # 5. Ejecutar SQL
+        print("[DataAgent] (Paso 5) Ejecutando SQL sobre SQLite local...")
         columns, rows = self._execute_sql(mem_conn, sql)
+        print(f"[DataAgent] Ejecución exitosa. Filas retornadas del motor: {len(rows)}")
 
         # 6. Calcular métricas en Python (sin LLM)
         summary = self._compute_summary(mem_conn)
         mem_conn.close()
 
         # 7. LLM formatea la respuesta
-        return self._format_response(user_message, sql, columns, rows, summary)
+        print("[DataAgent] (Paso 6) Llamado final para traducción humano-natural...")
+        res = self._format_response(user_message, sql, columns, rows, summary)
+        print("[DataAgent] --- FIN FLUJO TEXT-TO-SQL ---\n")
+        return res
 
 
 data_agent = DataAgent()

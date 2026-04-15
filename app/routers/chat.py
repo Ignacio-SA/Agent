@@ -34,9 +34,17 @@ async def chat(request: ChatRequest):
     Usa el orquestador para decidir qué agente responde
     """
     try:
+        print(f"\n[{'='*40}]")
+        print(f"[Router Global] Nueva petición recibida (Session ID: {request.session_id})")
+        print(f"[{'-'*40}]")
+
         # Obtener memoria previa
         memory = memory_agent.retrieve_memory(request.session_id)
         memory_context = memory.get("summary", "") if memory else ""
+        if memory_context:
+            print(f"[MemoryAgent] Historial previo contextual rescatado y adjuntado: '{memory_context}'")
+        else:
+            print("[MemoryAgent] Sin historial previo. Sesión limpia.")
 
         # Orquestador decide qué agente (con training_mode)
         decision = orchestrator.decide_agent(
@@ -98,6 +106,9 @@ async def _handle_feedback(request: ChatRequest) -> str:
         from ..db.memory_repo import memory_repo as repo
         messages = repo.get_messages(request.session_id)
 
+        print("\n[Feedback Global] --- INICIO FLUJO DE RECOLECCIÓN DE FEEDBACK ---")
+        print(f"[Feedback Global] Mensaje recibido del usuario interpretado como feedback: '{request.message}'")
+        
         history = []
         for msg in messages[-10:]:
             history.append({
@@ -105,12 +116,15 @@ async def _handle_feedback(request: ChatRequest) -> str:
                 "content": msg.get("content", ""),
                 "agent_type": msg.get("agent_type", ""),
             })
+            
+        print(f"[Feedback Global] Reconstruyendo el contexto... se enviarán {len(history)} mensajes del historial reciente al agente.")
 
         training_agent.process_feedback(
             session_id=request.session_id,
             history=history,
             feedback_message=request.message,
         )
+        print("[Feedback Global] --- FIN FLUJO DE RECOLECCIÓN DE FEEDBACK ---\n")
     except Exception as e:
         print(f"[Training] Error procesando feedback: {e}")
         traceback.print_exc()

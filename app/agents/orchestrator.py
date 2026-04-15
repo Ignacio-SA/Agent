@@ -16,6 +16,7 @@ class OrchestratorAgent:
         Claude Sonnet decide cuál sub-agente activar.
         Retorna: {agent_type, reasoning, params}
         """
+        print(f"[Orchestrator] Mensaje recibido a la espera de derivación: '{user_message}'")
         system_prompt = """Eres un orquestador de un chatbot de ventas para franquiciados. Clasifica el mensaje:
 
 1. "data" — consultas de ventas, productos, artículos, precios, turnos, POS, reportes, métricas del negocio.
@@ -55,8 +56,15 @@ Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory":
             start = text.find("{")
             end = text.rfind("}") + 1
             result = json.loads(text[start:end])
+            
+            agent = result.get('agent_type', 'unknown')
+            reason = result.get('reasoning', 'No reason provided')
+            print(f"[Orchestrator] Agente Final seleccionado: {agent.upper()}")
+            print(f"[Orchestrator] Razón Pensada por el Modelo: {reason}")
+            
             return result
         except Exception:
+            print("[Orchestrator] Falló el parseo JSON del LLM. Procediendo con el Ruteo por Keyword Fallback.")
             pass
 
         # Fallback por palabras clave si el LLM no retorna JSON válido
@@ -68,12 +76,16 @@ Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory":
         keywords_interaction = ["hola", "gracias", "ayuda", "cómo funciona", "que puedes hacer"]
         msg_lower = user_message.lower()
         if any(k in msg_lower for k in keywords_feedback):
+            print("[Orchestrator] Ruteo por Default/Keyword Fallback activado -> FEEDBACK")
             return {"agent_type": "feedback", "reasoning": "keyword fallback", "should_use_memory": True}
         if any(k in msg_lower for k in keywords_data):
+            print("[Orchestrator] Ruteo por Default/Keyword Fallback activado -> DATA")
             return {"agent_type": "data", "reasoning": "keyword fallback", "should_use_memory": False}
         if any(k in msg_lower for k in keywords_interaction):
+            print("[Orchestrator] Ruteo por Default/Keyword Fallback activado -> INTERACTION")
             return {"agent_type": "interaction", "reasoning": "keyword fallback", "should_use_memory": False}
 
+        print("[Orchestrator] Ruteo por Default Fallback activado -> OFF_TOPIC")
         return {"agent_type": "off_topic", "reasoning": "Default fallback", "should_use_memory": False}
 
     def get_training_context_for_agent(self, training_mode: bool) -> str:

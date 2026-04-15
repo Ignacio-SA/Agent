@@ -31,6 +31,29 @@ Dado que `DataAgent` es el motor central lógico y el factor de riesgo, se instr
 * **Dumper Local Estricto (Tool de Diagnóstico Definitiva):**
   * Se inyectó código en `_dump_to_local_sql_server(self, sales: list)` que intercepta el *batch* devuelto por MS Fabric y lo impacta usando PyODBC dentro de un servidor SQL **local** (`localhost\SQLEXPRESS`). 
   * Este paso crea y sobreescribe dinámicamente `[BasePruebaMCP].[dbo].[ventas_chatbot_debug]`. La finalidad es que el desarrollador pueda reproducir consultas SQLite desde SSMS/ADS y certificar que la data es correcta.
+  
+  **Intervención de Agentes (MCP Fallback):**
+  Como la tabla se guarda de esta manera, también queda 100% disponible para que **cualquier agente IA (con acceso a terminal local)** pueda utilizar un script de Python de consulta mediante el driver de Windows y extraer, debuguear o verificar los resultados en tiempo real sin necesidad de un servidor MCP dedicado.
+
+  > **Script de Conexión y Diagnóstico para Agentes:**
+  > ```python
+  > import pyodbc
+  > 
+  > # Cadena literal a la instancia basada en la captura de pantalla SQLEXPRESS
+  > conn_string = (
+  >     "DRIVER={ODBC Driver 17 for SQL Server};"
+  >     "SERVER=localhost\\SQLEXPRESS;"
+  >     "DATABASE=BasePruebaMCP;" # O la base de datos que necesites (ej master)
+  >     "Trusted_Connection=yes;" # Esto es "Authentication type: Windows Authentication"
+  >     "TrustServerCertificate=yes;" # "Trust server certificate: True"
+  > )
+  > 
+  > conn = pyodbc.connect(conn_string)
+  > cursor = conn.cursor()
+  > cursor.execute("SELECT @@version;")
+  > row = cursor.fetchone()
+  > print("Conectado a:", row[0])
+  > ```
 
 ## 4. Estabilidad y Protecciones Críticas (Drivers y SQLite)
 * **`app/db/connection.py`**:
@@ -39,5 +62,15 @@ Dado que `DataAgent` es el motor central lógico y el factor de riesgo, se instr
   * Se insertó un control estricto que intercepta en seco a `content` (`if content is None: content = ""`).
   * *Motivo:* Si por algún error subyacente del LLM la cadena retornaba como "Null", el motor SQlite que guardaba los resúmenes del chat crasheaba con la directiva *NOT NULL Constraint Failed*. Esta pequeña línea lo vuelve anti-roturas.
 
-## 5. Edición Provisional de Negocio (`context/business_rules.md`)
-* Se removió temporalmente la obligación algorítmica de encadenar `WHERE Type = '1'` para consultas generales. Al haber disonancia con los importes que otorga la BD Fabric por default (cuyas variables difirieron de lo que la regla de negocio mandaba como único estándar), quitamos el candado para permitir que la Inteligencia Artificial analice sumatorias y conteos brutos.
+## 5. Trazabilidad del Sistema de Entrenamiento (`TrainingAgent` y Feedback Global)
+Para interceptar adecuadamente la compresión del LLM secundario (`Claude Haiku`) encargado de reaccionar proactivamente al humano, se agregaron cabeceras visuales para demarcar el ciclo de "Feedback":
+
+* **Nuevos Logs agregados:**
+  * `[Feedback Global]` Informa la intercepción del texto exacto que el humano ha dictado señalándolo como feedback.
+  * `[Feedback Global]` Reporta cuántos mensajes de contexto reconstruido se envían a empaquetar para dárselos al AI.
+  * `[TrainingAgent]` Notifica el comienzo del "(Paso 1) Extrayendo contexto y analizando retroalimentación humana profunda".
+  * `[TrainingAgent]` Informa la disección psíquica del caso *(Paso 2)* clasificándolo en: `POSITIVO/NEGATIVO` y cuál determinó que es el `COMPONENTE` fallido (ej: `data_agent`).
+  * `[TrainingAgent]` Publica *(Paso 3)* su conclusión detallando la causa raíz del fallo / o del acierto.
+  * `[TrainingAgent]` Publica *(Paso 4)* la sugerencia que inyectará.
+  * `[TrainingAgent]` Confirma en pantalla que la sugerencia impactó en RAM y disco y será usada de acá de por vida (hasta ser manualmente aprobada).
+

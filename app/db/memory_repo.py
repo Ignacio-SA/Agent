@@ -113,6 +113,8 @@ class MemoryRepository:
 
     @staticmethod
     def save_message(session_id: str, role: str, content: str, agent_type: str = None):
+        if content is None:
+            content = ""
         now = datetime.now().isoformat()
         with _get_conn() as conn:
             conn.execute(

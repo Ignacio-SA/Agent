@@ -20,6 +20,8 @@ class TrainingAgent:
         history_text = self._format_history(history)
         recent_entries = training_memory.get_recent_entries(5)
         recent_context = self._format_recent_entries(recent_entries)
+        
+        print("\n[TrainingAgent] (Paso 1) Extrayendo contexto y analizando retroalimentación humana profunda...")
 
         system_prompt = f"""Eres un analista de calidad de un chatbot de ventas para franquiciados.
 Tu trabajo es analizar el ciclo de feedback del usuario y generar sugerencias de mejora.
@@ -69,7 +71,12 @@ Criterios de prioridad:
             suggestion["session_id"] = session_id
             suggestion["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
+            print(f"[TrainingAgent] (Paso 2) Clasificación Terminada -> TIPO: {suggestion.get('type', '¿?').upper()} | COMPONENTE: {suggestion.get('component', '¿?')} | PRIORIDAD: {suggestion.get('priority', '¿?').upper()}")
+            print(f"[TrainingAgent] (Paso 3) Causa raíz identificada: '{suggestion.get('cause', 'N/A')}'")
+            print(f"[TrainingAgent] (Paso 4) Sugerencia técnica a inyectar: '{suggestion.get('suggestion', 'N/A')}'")
+            
             training_memory.add_suggestion(suggestion)
+            print("[TrainingAgent] Sugerencia impactada en disco/memoria (training_log.md)")
             return suggestion
 
         except Exception as e:
