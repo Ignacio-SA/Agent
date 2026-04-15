@@ -5,10 +5,10 @@ from ..config import settings
 
 class InteractionAgent:
     def __init__(self):
-        self.client = Anthropic(api_key=settings.anthropic_api_key)
+        self.client = Anthropic(api_key=settings.anthropic_api_key, max_retries=3)
         self.model = "claude-haiku-4-5-20251001"
 
-    def respond(self, user_message: str, memory_context: str = "") -> str:
+    def respond(self, user_message: str, memory_context: str = "") -> tuple[str, int, int]:
         """
         Claude Haiku responde conversacionalmente
         """
@@ -30,7 +30,7 @@ No expliques por qué. No ofrezcas alternativas. No traduzcas ni resuelvas tarea
             messages=[{"role": "user", "content": user_message}],
         )
 
-        return response.content[0].text
+        return response.content[0].text, response.usage.input_tokens, response.usage.output_tokens
 
 
 interaction_agent = InteractionAgent()

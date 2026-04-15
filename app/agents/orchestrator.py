@@ -7,7 +7,7 @@ from ..config import settings
 
 class OrchestratorAgent:
     def __init__(self):
-        self.client = Anthropic(api_key=settings.anthropic_api_key)
+        self.client = Anthropic(api_key=settings.anthropic_api_key, max_retries=3)
         self.model = "claude-sonnet-4-6"
 
     def decide_agent(self, user_message: str, memory_context: str = "") -> dict:
@@ -34,12 +34,15 @@ Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory":
             messages=[{"role": "user", "content": f"{context}\nMensaje del usuario: {user_message}\n\nResponde SOLO con el JSON, sin texto adicional."}],
         )
 
+        usage = {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
+
         try:
             text = response.content[0].text.strip()
             # Extraer JSON aunque venga con texto extra
             start = text.find("{")
             end = text.rfind("}") + 1
             result = json.loads(text[start:end])
+            result.update(usage)
             return result
         except:
             pass
@@ -50,11 +53,11 @@ Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory":
         keywords_interaction = ["hola", "gracias", "ayuda", "cómo funciona", "que puedes hacer"]
         msg_lower = user_message.lower()
         if any(k in msg_lower for k in keywords_data):
-            return {"agent_type": "data", "reasoning": "keyword fallback", "should_use_memory": False}
+            return {"agent_type": "data", "reasoning": "keyword fallback", "should_use_memory": False, **usage}
         if any(k in msg_lower for k in keywords_interaction):
-            return {"agent_type": "interaction", "reasoning": "keyword fallback", "should_use_memory": False}
+            return {"agent_type": "interaction", "reasoning": "keyword fallback", "should_use_memory": False, **usage}
 
-        return {"agent_type": "off_topic", "reasoning": "Default fallback", "should_use_memory": False}
+        return {"agent_type": "off_topic", "reasoning": "Default fallback", "should_use_memory": False, **usage}
 
 
 orchestrator = OrchestratorAgent()

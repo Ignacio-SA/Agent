@@ -23,12 +23,12 @@ SQLite en memoria (Text-to-SQL)     SQLite local (memoria de sesiones)
 > Para la documentación completa de arquitectura, componentes y decisiones de diseño ver [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Flujo del Data Agent (Text-to-SQL)
-1. Extrae el rango de fechas del mensaje con el LLM (`temperature=0`)
+1. Extrae el rango de fechas del mensaje (Python primero, LLM como fallback) — usa el contexto de conversación previa si el mensaje no tiene fecha explícita
 2. Ejecuta `sp_GetSalesForChatbot` en Fabric Warehouse con el `FranchiseCode` y rango de fechas
 3. Carga los resultados en una tabla `ventas` SQLite en memoria
-4. El LLM genera una consulta SQLite a partir del lenguaje natural (`temperature=0`)
+4. El LLM genera una consulta SQLite a partir del lenguaje natural (`temperature=0`) — con contexto de conversación previa para seguimiento de preguntas
 5. Ejecuta el SQL
-6. Calcula métricas clave en Python (transacciones únicas, totales, por vendedor, top productos, horas activas) — sin LLM
+6. Calcula métricas clave en Python (transacciones únicas, totales, por vendedor, top productos, horas activas) — sin LLM, filtradas por el mismo período que pidió el usuario
 7. Formatea la respuesta en español usando los datos pre-calculados
 
 ## Requisitos
@@ -133,6 +133,32 @@ Elimina una sesión y todos sus mensajes.
 ### `GET /chat/history/{session_id}`
 Resumen de contexto de una sesión.
 
+### `POST /debug/query/csv`
+Ejecuta un SQL crudo contra los datos del SP y devuelve un CSV descargable (UTF-8 con BOM para Excel). Útil para validar las consultas generadas por el agente.
+```json
+{
+  "franchise_id": "4066b2def050495a8fc9ff8c0cb3f8f4",
+  "sql": "SELECT * FROM ventas WHERE \"Type\" != '2' LIMIT 100",
+  "date_from": "2026-03-25",
+  "date_to": "2026-03-25"
+}
+```
+
+### `POST /debug/query/json`
+Igual que `/debug/query/csv` pero devuelve JSON con `{total_rows, columns, rows}`.
+
+### `GET /debug/token-logs`
+Log de consumo de tokens por consulta. Acepta `?session_id=xxx` para filtrar por sesión. Sin parámetro devuelve el historial completo de todas las sesiones.
+```json
+{
+  "total_queries": 12,
+  "total_input_tokens": 18400,
+  "total_output_tokens": 3200,
+  "total_tokens": 21600,
+  "rows": [...]
+}
+```
+
 ## Estructura del proyecto
 
 ```
@@ -150,11 +176,14 @@ Agent/
 │   ├── models/
 │   │   └── schemas.py           # Modelos Pydantic
 │   ├── routers/
-│   │   └── chat.py              # Endpoints FastAPI
+│   │   ├── chat.py              # Endpoints de chat y sesiones
+│   │   └── debug.py             # Endpoints de debug (query/csv, query/json)
+│   ├── logger.py                # Logger por sesión (logs/<session_id>.log)
 │   ├── config.py                # Variables de entorno
 │   └── main.py                  # App FastAPI
 ├── context/
 │   └── business_rules.md        # Reglas de negocio (leídas en runtime)
+├── logs/                        # Logs por sesión (auto-generado, en .gitignore)
 ├── sql/
 │   └── sp_GetSalesForChatbot.sql
 ├── ui_test/
@@ -183,20 +212,23 @@ Clasifica cada mensaje en uno de cuatro tipos:
 
 | Tipo | Descripción | Costo |
 |---|---|---|
-| `data` | Consultas de ventas, productos, precios, reportes | Alto (3 LLM calls) |
+| `data` | Consultas de ventas, productos, precios, reportes | Alto (hasta 3 LLM calls) |
 | `interaction` | Saludos, preguntas sobre el chatbot | Bajo (1 LLM call, 200 tokens) |
-| `off_topic` | Programación, clima, traducciones, etc. | Cero (respuesta fija) |
+| `off_topic` | Programación, clima, traducciones, etc. | Cero (respuesta fija, 0 tokens) |
 | `memory` | "¿Qué hablamos antes?" | Mínimo (solo lectura DB) |
+
+Cada consulta registra el consumo real de tokens (input + output, por agente) en la tabla `query_logs` del SQLite local. Consultable via `GET /debug/token-logs`.
 
 Usa palabras clave como fallback si el LLM no responde en formato JSON válido. El default de fallback es `off_topic` (no `interaction`) para evitar gastar tokens en mensajes irrelevantes.
 
 ### Data Agent (Claude Haiku)
-1. Llama al SP con el `franchise_id` y rango de fechas extraído del mensaje
-2. Carga los datos en SQLite en memoria (decodificando `DATETIMEOFFSET` binario de pyodbc)
-3. Genera SQL SQLite con el LLM (`temperature=0`, usando las reglas de negocio como contexto)
-4. Ejecuta el SQL
-5. Calcula métricas de resumen en Python (sin LLM): transacciones únicas por `COUNT(DISTINCT id)`, totales, desglose por vendedor, top productos y franjas horarias
-6. Formatea la respuesta usando los números pre-calculados — el LLM solo presenta, no recalcula
+1. Extrae el rango de fechas con detección Python primero (hoy/ayer/esta semana/semana pasada/este mes) y LLM como fallback para fechas específicas — el contexto de conversación previa se inyecta para mantener el período en preguntas de seguimiento ("haz un desglose por items" después de "ventas del 01/12")
+2. Llama al SP con el `franchise_id` y rango de fechas extraído
+3. Carga los datos en SQLite en memoria (decodificando `DATETIMEOFFSET` binario de pyodbc)
+4. Genera SQL SQLite con el LLM (`temperature=0`, usando las reglas de negocio y contexto de conversación como contexto)
+5. Ejecuta el SQL
+6. Calcula métricas de resumen en Python (sin LLM): transacciones únicas por `COUNT(DISTINCT id)`, totales, desglose por vendedor, top productos y franjas horarias — filtradas por el mismo período que el usuario pidió
+7. Formatea la respuesta usando los números pre-calculados — el LLM solo presenta, no recalcula
 
 ### Interaction Agent (Claude Haiku)
 Responde únicamente saludos y preguntas sobre el uso del chatbot (`max_tokens=200`). Si el mensaje no está relacionado con ventas o el negocio, devuelve una respuesta corta fija sin gastar tokens adicionales. El filtrado real de mensajes off-topic ocurre en el Orchestrator antes de llegar a este agente.

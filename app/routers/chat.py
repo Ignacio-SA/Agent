@@ -28,20 +28,29 @@ async def chat(request: ChatRequest):
         decision = orchestrator.decide_agent(request.message, memory_context)
         agent_type = decision.get("agent_type", "interaction")
 
+        # Tokens del orchestrator
+        orch_in = decision.get("input_tokens", 0)
+        orch_out = decision.get("output_tokens", 0)
+
         # Invocar agente correspondiente
+        agent_in = agent_out = 0
         if agent_type == "data":
-            response_text = data_agent.process_data_request(request.message, request.franchise_id, memory_context)
+            response_text, agent_in, agent_out = data_agent.process_data_request(request.message, request.franchise_id, memory_context, request.session_id)
         elif agent_type == "memory":
             response_text = f"Recordando: {memory_context}"
         elif agent_type == "off_topic":
             response_text = "Solo puedo ayudarte con consultas de ventas o datos del negocio. Consultá con el administrador para otros temas."
         else:  # interaction
-            response_text = interaction_agent.respond(request.message, memory_context)
+            response_text, agent_in, agent_out = interaction_agent.respond(request.message, memory_context)
 
-        # Guardar mensajes individuales
+        # Guardar mensajes individuales y log de tokens
         from ..db.memory_repo import memory_repo as repo
         repo.save_message(request.session_id, "user", request.message)
         repo.save_message(request.session_id, "assistant", response_text, agent_type)
+        repo.save_query_log(
+            request.session_id, request.message, agent_type,
+            orch_in + agent_in, orch_out + agent_out,
+        )
 
         # Guardar memoria/resumen
         conversation = [

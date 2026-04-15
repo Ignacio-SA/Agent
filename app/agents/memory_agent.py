@@ -7,7 +7,7 @@ from ..models.memory import MemoryEntry
 
 class MemoryAgent:
     def __init__(self):
-        self.client = Anthropic(api_key=settings.anthropic_api_key)
+        self.client = Anthropic(api_key=settings.anthropic_api_key, max_retries=3)
         self.model = "claude-haiku-4-5-20251001"
 
     def save_memory(self, session_id: str, user_id: str, conversation: list[dict]) -> str:
