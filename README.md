@@ -198,7 +198,11 @@ Agent/
 ## Reglas de negocio (`context/business_rules.md`)
 
 El agente lee este archivo en cada consulta. Contiene:
-- Descripción de columnas de la tabla `ventas`
+- Descripción de columnas de la tabla `ventas`, incluyendo los campos de canal y pago:
+  - `CtaChannel` — canal de venta (Tienda, Delivery, Take Away)
+  - `VtaOperation` — tipo de operación (Socios / No Socios)
+  - `Plataforma` — plataforma delivery (PediGrido, PedidosYa, Rappi) o NULL
+  - `FormaPago` — medio de pago del ticket
 - Regla del campo `Type`: `0` = venta regular, `1` = ítem dentro de promoción, `2` = cabecera de promoción (excluir de totales con `Type != '2'`)
 - Reglas de presentación: no mostrar información técnica al usuario
 - Reglas de búsqueda: siempre usar `LOWER(...) LIKE LOWER('%texto%')` para nombres de artículos

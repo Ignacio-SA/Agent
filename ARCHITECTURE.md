@@ -286,16 +286,27 @@ WHERE h.FranchiseCode = @FranchiseCode
   AND (
     ...SWITCHOFFSET(TRY_CONVERT(DATETIMEOFFSET, h.DateTimeUtc), '-03:00')...
   )
-
--- CTE de cancelados (equivalente al LATERAL VIEW explode de Spark)
-;WITH Cancelled AS (
-    SELECT DISTINCT s.id AS SaleDocId
-    FROM sc_Silver_Cosmos_Sales_Sales s
-    CROSS APPLY OPENJSON(s.StateHistory)
-    WITH (Code NVARCHAR(100) '$.State.Code') sh
-    WHERE s.StateHistory IS NOT NULL AND sh.Code = 'Cancelled'
-)
 ```
+
+El SP usa **5 CTEs** que traducen columnas JSON de `sc_Silver_Cosmos_Sales_Sales` a T-SQL con `CROSS APPLY OPENJSON` (equivalente al `LATERAL VIEW explode` de Spark):
+
+| CTE | Columna JSON | Resultado | Notas |
+|---|---|---|---|
+| `Cancelled` | `StateHistory` | Tickets cancelados a excluir | `Code = 'Cancelled'` |
+| `TypeSale` | `TypeSale` | `TypeSaleId` por ticket | 1 entrada por ticket (validado) |
+| `RelatedPlatforms` | `RelatedPlatforms` | `RelatedPlatformCode` (INT) | Base para Platform y CG |
+| `Platform` | — (deriva de RelatedPlatforms) | Plataforma delivery (códigos 4/5/6) | `MAX GROUP BY` → 1 fila por ticket |
+| `CG` | — (deriva de RelatedPlatforms) | Socios ClubGrido (código 3) | `DISTINCT` → 1 fila por ticket |
+| `Payment` | `PaymentData` | Medio de pago agregado | `COUNT/MAX GROUP BY` → 1 fila por ticket |
+
+Columnas calculadas en el SELECT con los CTEs anteriores:
+
+| Columna | Lógica |
+|---|---|
+| `CtaChannel` | Take Away si PediGrido (code 5), sino según TypeSaleId 100/101/102, sino 'Tienda *' |
+| `VtaOperation` | 'Socios' si existe en CG, sino 'No Socios' |
+| `Plataforma` | 'PediGrido' / 'PedidosYa' / 'Rappi' según Platform.RelatedPlatformCode, NULL si venta directa |
+| `FormaPago` | Nombre del medio de pago, o 'Múltiples medios de pago' si cantidad > 1 |
 
 > **Atención:** `FranchiseCode` y `FranchiseeCode` son **dos columnas distintas** con valores diferentes. El filtro va sobre `FranchiseCode`.
 
@@ -447,3 +458,11 @@ Spark excluye canceladas via `Cloud_StateHistory WHERE Code = 'Cancelled'`. El S
 ### ¿Por qué se pasa el contexto de sesión al Data Agent?
 
 Sin contexto, cada mensaje se procesa de forma aislada. Si el usuario pregunta "ventas del 01/12" y luego "haz un desglose por items", la segunda pregunta no tiene fecha → el agente trae el año completo → el SQL falla o es incorrecto. Pasando el resumen de sesión como contexto a `_extract_date_range` y `_generate_sql`, el LLM puede inferir el período correcto de la conversación previa.
+
+### ¿Por qué se agregan CtaChannel, VtaOperation, Plataforma y FormaPago al SP?
+
+Estos campos permiten al chatbot responder preguntas de negocio como "¿cuántas ventas fueron delivery?" o "¿qué porcentaje pagó con efectivo?". Se calculan en el SP (no en Python) porque requieren datos JSON de `sc_Silver_Cosmos_Sales_Sales` que no están en la vista de detalles.
+
+Los 4 campos se traen con `LEFT JOIN` para no reducir el conteo de tickets: si un ticket no tiene TypeSale o PaymentData en el JSON, devuelve NULL en esos campos en lugar de desaparecer de los resultados.
+
+`RelatedPlatformCode` está almacenado como **integer** en el JSON (sin comillas). El `OPENJSON WITH` lo declara como `INT` y las comparaciones en los CTEs usan enteros directamente (`IN (4,5,6)`, `= 3`).
