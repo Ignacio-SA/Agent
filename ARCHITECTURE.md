@@ -39,7 +39,9 @@ Agent/
 │   │   ├── memory_agent.py       # Genera y recupera resúmenes de sesión
 │   │   └── training_agent.py     # Analiza feedback y genera sugerencias de mejora
 │   ├── routers/
-│   │   └── chat.py               # Endpoints HTTP de la API
+│   │   ├── chat.py               # Endpoints HTTP de chat y sesiones
+│   │   └── debug.py              # Endpoints de debug (/debug/query/csv y /debug/query/json)
+│   ├── logger.py                 # Logger por sesión → logs/<session_id>.log
 │   ├── db/
 │   │   ├── connection.py         # Conexión a Fabric Warehouse (pyodbc + Azure AD)
 │   │   ├── sales_repo.py         # Ejecuta el SP de ventas
@@ -56,6 +58,7 @@ Agent/
 │   └── create_chatbot_memory.sql  # Script auxiliar (referencia)
 ├── ui_test/
 │   └── index.html                # UI de prueba (chat + panel de sesiones + toggle entrenamiento)
+├── logs/                         # Logs por sesión (se crea automáticamente, en .gitignore)
 ├── memory.db                     # SQLite local (se crea automáticamente)
 ├── .env                          # Variables de entorno (NO commitear)
 ├── .env.example                  # Plantilla de variables de entorno
@@ -84,24 +87,33 @@ Agent/
         ▼ (si es "data")
 4. DataAgent.process_data_request()
    │
-   ├─ a) sales_repo.get_sales(franchise_code)
-   │       └─ EXEC sp_GetSalesForChatbot @FranchiseCode=?
-   │           └─ Retorna rows del Fabric Warehouse
+   ├─ a) _extract_date_range(user_message, context)
+   │       ├─ Detección Python primero: hoy/ayer/esta semana/semana pasada/este mes
+   │       └─ LLM fallback con contexto de conversación previa inyectado
+   │           └─ Permite "haz un desglose por items" sin repetir la fecha
    │
-   ├─ b) _load_into_memory(sales)
+   ├─ b) sales_repo.get_sales(franchise_code, date_from, date_to)
+   │       └─ EXEC sp_GetSalesForChatbot @FranchiseCode=?, @DateFrom=?, @DateTo=?
+   │           └─ Retorna rows del Fabric Warehouse (filtrado por header.DateTimeUtc)
+   │
+   ├─ c) _load_into_memory(sales)
    │       └─ Crea tabla SQLite en RAM con los datos
    │           └─ Decodifica DATETIMEOFFSET (20 bytes raw) con struct.unpack
    │
-   ├─ c) _generate_sql(user_message)
+   ├─ d) _generate_sql(user_message, total_rows, today, context)
    │       └─ LLM (Haiku) genera SQL SQLite
-   │           └─ Incluye business_rules.md como contexto del sistema
+   │           └─ Incluye business_rules.md y contexto de conversación
    │
-   ├─ d) _execute_sql(conn, sql)
+   ├─ e) _execute_sql(conn, sql)
    │       └─ Ejecuta la consulta sobre SQLite en memoria
    │
-   └─ e) _format_response(user_message, sql, columns, rows)
+   ├─ f) _compute_summary(conn, date_filter, period_label)
+   │       └─ Calcula métricas en Python (sin LLM): totales, por vendedor, top productos, horas
+   │           └─ Filtradas por el mismo período que pidió el usuario
+   │
+   └─ g) _format_response(user_message, sql, columns, rows, summary)
            └─ LLM (Haiku) convierte los resultados a lenguaje natural
-               └─ Incluye business_rules.md para no mostrar datos técnicos
+               └─ Usa los números pre-calculados del summary — no recalcula
         │
         ▼
 5. chat.py guarda los mensajes en SQLite local (chat_messages)
@@ -135,17 +147,28 @@ El fallback por keywords evita llamadas extra si el LLM falla en retornar JSON v
 Es el agente más complejo. Implementa un pipeline **Text-to-SQL**:
 
 ```
-Pregunta en español
+Pregunta en español + contexto de sesión
       │
       ▼
-LLM genera SQL (SQLite syntax) con reglas de negocio inyectadas
+_extract_date_range() — Python primero, LLM fallback con contexto
       │
       ▼
-SQL ejecutado contra tabla en RAM (datos frescos del SP)
+SP en Fabric (filtrado por fecha del header, sin canceladas)
       │
       ▼
-LLM formatea resultado como respuesta natural para el usuario
+_generate_sql() — LLM genera SQL SQLite con business_rules + contexto
+      │
+      ▼
+SQL ejecutado contra tabla en RAM
+      │
+      ▼
+_compute_summary() — métricas calculadas en Python, filtradas por período
+      │
+      ▼
+_format_response() — LLM presenta los datos pre-calculados en lenguaje natural
 ```
+
+**Punto crítico — contexto de conversación:** El parámetro `context` (resumen de sesión) se pasa tanto a `_extract_date_range` como a `_generate_sql`. Esto permite que preguntas de seguimiento como "haz un desglose por items" (sin fecha) hereden el período de la pregunta anterior.
 
 **Punto crítico — DATETIMEOFFSET:** `pyodbc` retorna las fechas del Fabric Warehouse como 20 bytes raw. Hay que decodificarlos con:
 ```python
@@ -154,6 +177,8 @@ struct.unpack('<hHHHHHIhh', v)
 ```
 
 **Punto crítico — SQLite:** La tabla en memoria usa comillas en todos los nombres de columna (`"Type" TEXT`) porque `Type` es palabra reservada en SQLite.
+
+**Punto crítico — period_label:** El resumen pre-calculado incluye la etiqueta del período (`=== DATOS PRE-CALCULADOS — PERÍODO: 01/12/2025 ===`). Sin esto el LLM no sabe a qué fecha corresponden los números y puede decir "no tengo información de ese día".
 
 ---
 
@@ -231,6 +256,22 @@ session_id | user_id | context | summary | created_at | updated_at
 id | session_id | role | content | agent_type | created_at
 ```
 
+**`query_logs`** — Un registro por consulta con el consumo real de tokens:
+```
+id | session_id | user_message | agent_type | input_tokens | output_tokens | total_tokens | created_at
+```
+
+Los tokens se acumulan de todas las llamadas LLM del request (orchestrator + agente):
+
+| Tipo de request | LLM calls trackeadas |
+|---|---|
+| `data` | hasta 3: `_extract_date_range` (solo si usa LLM fallback) + `_generate_sql` + `_format_response` |
+| `interaction` | 1: respuesta del interaction agent |
+| `off_topic` | 0: respuesta hardcodeada |
+| `memory` | 0: solo lectura de DB |
+
+Consultable via `GET /debug/token-logs?session_id=xxx`. Sin `session_id` devuelve el historial completo con totales acumulados.
+
 ---
 
 ### `context/business_rules.md` — Las reglas del negocio
@@ -246,17 +287,59 @@ Reglas clave que contiene:
 
 ---
 
+### `app/logger.py` — Logger por sesión
+
+Crea un archivo de log por sesión en `logs/<session_id>.log`. Reutiliza el logger si ya tiene handlers para evitar duplicar líneas. Con `propagate = False` no duplica al logger raíz.
+
+---
+
+### `app/routers/debug.py` — Endpoints de debug
+
+Tres endpoints para inspeccionar el sistema sin pasar por el chat:
+
+- `POST /debug/query/csv` — Ejecuta SQL contra los datos del SP, devuelve CSV con BOM UTF-8 (compatible con Excel en Windows)
+- `POST /debug/query/json` — Mismo SQL pero devuelve `{total_rows, columns, rows}`
+- `GET /debug/token-logs` — Historial de consumo de tokens por consulta. Acepta `?session_id=xxx`
+
+Body: `{franchise_id, sql, date_from?, date_to?}`
+
+> **Nota sobre comillas en JSON:** Si el SQL contiene `"Type"`, hay que escaparlo como `\"Type\"` dentro del string JSON.
+
+---
+
 ### `sql/sp_GetSalesForChatbot.sql` — El Stored Procedure
 
 Corre en **Microsoft Fabric Warehouse**. Puntos críticos:
 
 ```sql
--- Conversión de UTC a UTC-3 (Argentina)
-SWITCHOFFSET(TRY_CONVERT(DATETIMEOFFSET, d.SaleDateTimeUtc), '-03:00') AS SaleDateTimeUtc
-
--- Filtro correcto: FranchiseCode (sin doble 'e'), no FranchiseeCode
+-- Filtro de fecha usa el header (no el detalle) — evita perder tickets
+-- donde header y detalle tienen timestamps que caen en días distintos
 WHERE h.FranchiseCode = @FranchiseCode
+  AND c.SaleDocId IS NULL   -- excluye tickets cancelados
+  AND (
+    ...SWITCHOFFSET(TRY_CONVERT(DATETIMEOFFSET, h.DateTimeUtc), '-03:00')...
+  )
 ```
+
+El SP usa **5 CTEs** que traducen columnas JSON de `sc_Silver_Cosmos_Sales_Sales` a T-SQL con `CROSS APPLY OPENJSON` (equivalente al `LATERAL VIEW explode` de Spark):
+
+| CTE | Columna JSON | Resultado | Notas |
+|---|---|---|---|
+| `Cancelled` | `StateHistory` | Tickets cancelados a excluir | `Code = 'Cancelled'` |
+| `TypeSale` | `TypeSale` | `TypeSaleId` por ticket | 1 entrada por ticket (validado) |
+| `RelatedPlatforms` | `RelatedPlatforms` | `RelatedPlatformCode` (INT) | Base para Platform y CG |
+| `Platform` | — (deriva de RelatedPlatforms) | Plataforma delivery (códigos 4/5/6) | `MAX GROUP BY` → 1 fila por ticket |
+| `CG` | — (deriva de RelatedPlatforms) | Socios ClubGrido (código 3) | `DISTINCT` → 1 fila por ticket |
+| `Payment` | `PaymentData` | Medio de pago agregado | `COUNT/MAX GROUP BY` → 1 fila por ticket |
+
+Columnas calculadas en el SELECT con los CTEs anteriores:
+
+| Columna | Lógica |
+|---|---|
+| `CtaChannel` | Take Away si PediGrido (code 5), sino según TypeSaleId 100/101/102, sino 'Tienda *' |
+| `VtaOperation` | 'Socios' si existe en CG, sino 'No Socios' |
+| `Plataforma` | 'PediGrido' / 'PedidosYa' / 'Rappi' según Platform.RelatedPlatformCode, NULL si venta directa |
+| `FormaPago` | Nombre del medio de pago, o 'Múltiples medios de pago' si cantidad > 1 |
 
 > **Atención:** `FranchiseCode` y `FranchiseeCode` son **dos columnas distintas** con valores diferentes. El filtro va sobre `FranchiseCode`.
 
@@ -399,6 +482,26 @@ Para poder agregar o corregir reglas sin reiniciar el servidor ni hacer un deplo
 
 Para que mensajes fuera de scope (código, clima, traducciones) no consuman tokens de generación. El router responde con texto hardcodeado sin llamar a ningún modelo.
 
+### ¿Por qué el filtro de fecha usa `h.DateTimeUtc` y no `d.SaleDateTimeUtc`?
+
+El SP original filtraba por la fecha del detalle (`d.SaleDateTimeUtc`). Spark filtra por el header (`h.DateTimeUtc`). Como header y detalle pueden tener timestamps que caen en días distintos, el SP perdía ~20 tickets por día. El fix fue mover el filtro al header, igual que Spark.
+
+### ¿Por qué se excluyen los tickets cancelados?
+
+Spark excluye canceladas via `Cloud_StateHistory WHERE Code = 'Cancelled'`. El SP ahora replica esto con un `CROSS APPLY OPENJSON(StateHistory)` sobre la columna JSON del header. Sin este filtro el conteo de ventas no coincide con los reportes de negocio.
+
+### ¿Por qué se pasa el contexto de sesión al Data Agent?
+
+Sin contexto, cada mensaje se procesa de forma aislada. Si el usuario pregunta "ventas del 01/12" y luego "haz un desglose por items", la segunda pregunta no tiene fecha → el agente trae el año completo → el SQL falla o es incorrecto. Pasando el resumen de sesión como contexto a `_extract_date_range` y `_generate_sql`, el LLM puede inferir el período correcto de la conversación previa.
+
+### ¿Por qué se agregan CtaChannel, VtaOperation, Plataforma y FormaPago al SP?
+
+Estos campos permiten al chatbot responder preguntas de negocio como "¿cuántas ventas fueron delivery?" o "¿qué porcentaje pagó con efectivo?". Se calculan en el SP (no en Python) porque requieren datos JSON de `sc_Silver_Cosmos_Sales_Sales` que no están en la vista de detalles.
+
+Los 4 campos se traen con `LEFT JOIN` para no reducir el conteo de tickets: si un ticket no tiene TypeSale o PaymentData en el JSON, devuelve NULL en esos campos en lugar de desaparecer de los resultados.
+
+`RelatedPlatformCode` está almacenado como **integer** en el JSON (sin comillas). El `OPENJSON WITH` lo declara como `INT` y las comparaciones en los CTEs usan enteros directamente (`IN (4,5,6)`, `= 3`).
+
 ---
 
 ## 9. Sistema de Entrenamiento (Training Mode)
@@ -425,8 +528,8 @@ Usuario pregunta → Agente responde → Usuario da feedback
                  training_log.md                      TrainingMemory
                  (disco, append)                      (RAM, inyección)
                           │                                   │
-                Revisión humana                  Se usa en próximas
-                para aplicar                     respuestas del bot
+                 Revisión humana                  Se usa en próximas
+                 para aplicar                     respuestas del bot
 ```
 
 ### Archivos Involucrados

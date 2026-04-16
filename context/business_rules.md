@@ -16,6 +16,10 @@
 | TypeDetail         | TEXT    | Tipo de detalle del ítem                         |
 | UnitPriceFix       | REAL    | Precio unitario del ítem                         |
 | Type               | TEXT    | Tipo de registro (ver regla crítica abajo)       |
+| CtaChannel         | TEXT    | Canal de venta: 'Tienda', 'Delivery', 'Take Away', 'Tienda *' (sin datos de canal) |
+| VtaOperation       | TEXT    | Tipo de operación: 'Socios' (ClubGrido) o 'No Socios' |
+| Plataforma         | TEXT    | Plataforma delivery: 'PediGrido', 'PedidosYa', 'Rappi'. NULL si es venta directa |
+| FormaPago          | TEXT    | Medio de pago del ticket. 'Múltiples medios de pago' si usó más de uno. NULL si sin datos |
 
 ---
 
@@ -85,6 +89,7 @@ El usuario es un **franquiciado o vendedor**, no un analista ni desarrollador. L
 - Nombres de columnas internas (`FranchiseeCode`, `ShiftCode`, `PosCode`, `TypeDetail`, `ArticleId`)
 - Códigos UUID o hexadecimales de IDs internos
 - Menciones a la estructura de la base de datos
+- Valor `'Tienda *'` — mostrarlo simplemente como "Tienda"
 
 ### Cómo presentar la información:
 | Concepto técnico         | Cómo mostrarlo al usuario                          |
@@ -97,6 +102,10 @@ El usuario es un **franquiciado o vendedor**, no un analista ni desarrollador. L
 | UserName                 | "Vendedor/a"                                       |
 | UnitPriceFix             | "Precio"                                           |
 | SaleDateTimeUtc          | Fecha y hora formateada en español                 |
+| CtaChannel               | "Canal" o "tipo de venta"                          |
+| VtaOperation             | "Operación Socios" / "No Socios"                   |
+| Plataforma               | Mostrar tal cual (PedidosYa, PediGrido, Rappi)     |
+| FormaPago                | "Medio de pago"                                    |
 
 ### Cómo presentar franjas horarias:
 No mostrar el número de hora crudo. Convertirlo a rango legible:

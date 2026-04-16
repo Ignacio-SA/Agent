@@ -36,6 +36,19 @@ def init_memory_db():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session ON chat_messages(session_id)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS query_logs (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id    TEXT    NOT NULL,
+                user_message  TEXT,
+                agent_type    TEXT,
+                input_tokens  INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                total_tokens  INTEGER DEFAULT 0,
+                created_at    TEXT    NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_query_logs_session ON query_logs(session_id)")
         conn.commit()
 
 
@@ -122,6 +135,31 @@ class MemoryRepository:
                 (session_id, role, content, agent_type, now),
             )
             conn.commit()
+
+    @staticmethod
+    def save_query_log(session_id: str, user_message: str, agent_type: str, input_tokens: int, output_tokens: int):
+        now = datetime.now().isoformat()
+        with _get_conn() as conn:
+            conn.execute(
+                """INSERT INTO query_logs (session_id, user_message, agent_type, input_tokens, output_tokens, total_tokens, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, user_message, agent_type, input_tokens, output_tokens, input_tokens + output_tokens, now),
+            )
+            conn.commit()
+
+    @staticmethod
+    def get_query_logs(session_id: str = None) -> list[dict]:
+        with _get_conn() as conn:
+            if session_id:
+                rows = conn.execute(
+                    "SELECT * FROM query_logs WHERE session_id = ? ORDER BY created_at DESC",
+                    (session_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM query_logs ORDER BY created_at DESC"
+                ).fetchall()
+            return [dict(r) for r in rows]
 
     @staticmethod
     def get_messages(session_id: str) -> list[dict]:

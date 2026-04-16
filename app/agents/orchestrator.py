@@ -8,7 +8,7 @@ from ..db.training_repo import training_memory
 
 class OrchestratorAgent:
     def __init__(self):
-        self.client = Anthropic(api_key=settings.anthropic_api_key)
+        self.client = Anthropic(api_key=settings.anthropic_api_key, max_retries=3)
         self.model = "claude-sonnet-4-6"
 
     def decide_agent(self, user_message: str, memory_context: str = "", training_mode: bool = False) -> dict:
@@ -51,17 +51,20 @@ Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory":
             messages=[{"role": "user", "content": f"{context}\nMensaje del usuario: {user_message}\n\nResponde SOLO con el JSON, sin texto adicional."}],
         )
 
+        usage = {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
+
         try:
             text = response.content[0].text.strip()
             start = text.find("{")
             end = text.rfind("}") + 1
             result = json.loads(text[start:end])
-            
+
             agent = result.get('agent_type', 'unknown')
             reason = result.get('reasoning', 'No reason provided')
             print(f"[Orchestrator] Agente Final seleccionado: {agent.upper()}")
             print(f"[Orchestrator] Razón Pensada por el Modelo: {reason}")
-            
+
+            result.update(usage)
             return result
         except Exception:
             print("[Orchestrator] Falló el parseo JSON del LLM. Procediendo con el Ruteo por Keyword Fallback.")
@@ -80,13 +83,13 @@ Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory":
             return {"agent_type": "feedback", "reasoning": "keyword fallback", "should_use_memory": True}
         if any(k in msg_lower for k in keywords_data):
             print("[Orchestrator] Ruteo por Default/Keyword Fallback activado -> DATA")
-            return {"agent_type": "data", "reasoning": "keyword fallback", "should_use_memory": False}
+            return {"agent_type": "data", "reasoning": "keyword fallback", "should_use_memory": False, **usage}
         if any(k in msg_lower for k in keywords_interaction):
             print("[Orchestrator] Ruteo por Default/Keyword Fallback activado -> INTERACTION")
-            return {"agent_type": "interaction", "reasoning": "keyword fallback", "should_use_memory": False}
+            return {"agent_type": "interaction", "reasoning": "keyword fallback", "should_use_memory": False, **usage}
 
         print("[Orchestrator] Ruteo por Default Fallback activado -> OFF_TOPIC")
-        return {"agent_type": "off_topic", "reasoning": "Default fallback", "should_use_memory": False}
+        return {"agent_type": "off_topic", "reasoning": "Default fallback", "should_use_memory": False, **usage}
 
     def get_training_context_for_agent(self, training_mode: bool) -> str:
         """Genera el bloque de contexto de entrenamiento para inyectar en otros agentes."""
