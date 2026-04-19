@@ -13,6 +13,10 @@ class SalesRepository:
     ) -> list[dict]:
         with db.get_connection() as conn:
             cursor = conn.cursor()
+            print(f"\n[SalesRepo] === EJECUTANDO STORED PROCEDURE EN FABRIC ===")
+            print(f"[SalesRepo] Ejecutando: sp_GetSalesForChatbot")
+            print(f"[SalesRepo] Parámetros -> FranchiseCode: {franchise_code}, Year: {year}, DateFrom: {date_from}, DateTo: {date_to}")
+            print(f"[SalesRepo] =================================================\n")
             cursor.execute(
                 "EXEC sp_GetSalesForChatbot @FranchiseCode=?, @Year=?, @DateFrom=?, @DateTo=?",
                 (franchise_code, year, date_from, date_to),

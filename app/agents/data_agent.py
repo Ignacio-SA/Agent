@@ -285,10 +285,38 @@ Si no hay fecha en el mensaje ni en el contexto responde: {{"date_from": null, "
 
         return None, None, "", llm_in, llm_out
 
+    def _dump_to_local_sql_server(self, sales: list):
+        """Tool de Diagnóstico Definitiva: Impacta batch a localhost\\SQLEXPRESS"""
+        if not sales:
+            return
+        try:
+            import pyodbc
+            connection_string = "Driver={ODBC Driver 17 for SQL Server};Server=localhost\\SQLEXPRESS;Database=BasePruebaMCP;Trusted_Connection=yes;TrustServerCertificate=yes;"
+            conn = pyodbc.connect(connection_string, autocommit=True)
+            cursor = conn.cursor()
+            
+            cursor.execute("IF OBJECT_ID('ventas_chatbot_debug', 'U') IS NOT NULL DROP TABLE ventas_chatbot_debug;")
+            columns = list(sales[0].keys())
+            cols_def = ", ".join([f"[{c}] NVARCHAR(MAX)" for c in columns])
+            cursor.execute(f"CREATE TABLE ventas_chatbot_debug ({cols_def});")
+            
+            placeholders = ",".join(["?" for _ in columns])
+            insert_q = f"INSERT INTO ventas_chatbot_debug VALUES ({placeholders})"
+            
+            for row in sales:
+                vals = [str(v) if v is not None else None for v in row.values()]
+                cursor.execute(insert_q, vals)
+                
+            print(f"[DataAgent] DUMPER: {len(sales)} filas impactadas exitosamente en localhost\\SQLEXPRESS -> BasePruebaMCP.dbo.ventas_chatbot_debug")
+            conn.close()
+        except Exception as e:
+            print(f"[DataAgent] Omitiendo Dumper local (ignorado o sin acceso). Razón: {e}")
+
     def process_data_request(self, user_message: str, franchise_code: str, context: str = "", session_id: str = "") -> tuple[str, int, int]:
         log = get_session_logger(session_id) if session_id else logging.getLogger(__name__)
         today = datetime.now().strftime("%Y-%m-%d")
 
+        print("\n[DataAgent] --- INICIO FLUJO TEXT-TO-SQL ---")
         log.info("━" * 60)
         log.info(f"CONSULTA : {user_message!r}")
         log.info(f"FRANCHISE: {franchise_code}")
@@ -298,23 +326,45 @@ Si no hay fecha en el mensaje ni en el contexto responde: {{"date_from": null, "
         # 1. Extraer rango de fechas del mensaje para filtrar en el SP
         date_from, date_to, date_filter, tok_in, tok_out = self._extract_date_range(user_message, context)
         total_input += tok_in; total_output += tok_out
+        print(f"[DataAgent] (Paso 1) Extracción de Fechas/Horarios: {date_from} -> {date_to}")
         log.info(f"FECHAS   : date_from={date_from}  date_to={date_to}")
         log.info(f"FILTRO   : {date_filter or '(sin filtro de fecha — año completo)'}")
 
         # 2. Obtener datos del SP (solo el rango necesario)
+        print(f"[DataAgent] (Paso 2) Llamada de consulta al Store Procedure para franquicia '{franchise_code}'...")
         sales = sales_repo.get_sales(franchise_code, date_from=date_from, date_to=date_to)
         log.info(f"SP ROWS  : {len(sales)} filas devueltas por sp_GetSalesForChatbot")
+        
+        self._dump_to_local_sql_server(sales)
 
         # 3. Cargar en SQLite en memoria
+        print(f"[DataAgent] (Paso 3) Volcando tablas ({len(sales)} filas) hacia SQLite RAM temporal")
+        if sales:
+            print("[DataAgent] Vista previa tabular (primeros 5 renglones exactos de Azure):")
+            keys = list(sales[0].keys())
+            column_widths = {k: min(20, max(len(str(k)), 10)) for k in keys}
+            
+            header = " | ".join([str(k).ljust(column_widths[k])[:column_widths[k]] for k in keys])
+            print(f"   {header}")
+            print(f"   {'-'*len(header)}")
+            
+            for r in sales[:5]:
+                row_str = " | ".join([str(v).ljust(column_widths[k])[:column_widths[k]] for k, v in r.items()])
+                print(f"   {row_str}")
+                
         mem_conn = self._load_into_memory(sales)
 
         # 4. LLM genera SQL
+        print("[DataAgent] (Paso 4) Consultando SQL nativo al modelo...")
         sql, tok_in, tok_out = self._generate_sql(user_message, len(sales), today, context)
         total_input += tok_in; total_output += tok_out
+        print(f"[DataAgent] Código generado puro:\n-----\n{sql}\n-----")
         log.info(f"SQL GEN  :\n{sql}")
 
         # 5. Ejecutar SQL
+        print("[DataAgent] (Paso 5) Ejecutando SQL sobre SQLite local...")
         columns, rows = self._execute_sql(mem_conn, sql)
+        print(f"[DataAgent] Ejecución exitosa. Filas retornadas del motor: {len(rows)}")
         if rows and rows[0] and rows[0][0] and str(rows[0][0]).startswith("Error"):
             log.warning(f"SQL ERROR: {rows[0]}")
         else:
@@ -336,9 +386,11 @@ Si no hay fecha en el mensaje ni en el contexto responde: {{"date_from": null, "
         log.info("━" * 60)
 
         # 7. LLM formatea la respuesta
+        print("[DataAgent] (Paso 6) Llamado final para traducción humano-natural...")
         response_text, tok_in, tok_out = self._format_response(user_message, sql, columns, rows, summary)
         total_input += tok_in; total_output += tok_out
         log.info(f"TOKENS   : input={total_input}  output={total_output}  total={total_input + total_output}")
+        print("[DataAgent] --- FIN FLUJO TEXT-TO-SQL ---\n")
         return response_text, total_input, total_output
 
 
