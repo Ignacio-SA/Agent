@@ -95,6 +95,69 @@ FASTAPI_DEBUG=true
 
 ---
 
+### Conexión a Microsoft Fabric Warehouse
+
+#### Por qué `sql` y no el modo interactivo en Docker
+
+| Modo | Cómo autentica | ¿Funciona en Docker? | Cuándo usarlo |
+|------|---------------|----------------------|---------------|
+| `activedirectoryinteractive` | Abre browser → MFA | ❌ No | Solo dev local sin Docker |
+| `sql` | Usuario + contraseña | ✅ Sí | Docker local y servidores |
+| `managedidentity` | El servidor se autentica solo | ✅ Sí (solo en Azure) | Producción en Azure |
+
+#### Cómo obtener los datos de conexión a Fabric
+
+1. Ir al portal de **Microsoft Fabric** → [https://app.fabric.microsoft.com](https://app.fabric.microsoft.com)
+2. Abrir el **Workspace** y seleccionar el **Warehouse**
+3. Ir a **Settings** (engranaje) → **SQL connection string**
+4. Copiar los valores:
+
+```
+Server:   <workspace>.datawarehouse.fabric.microsoft.com
+Database: <nombre del warehouse>
+```
+
+5. El **usuario** es el email corporativo (`usuario@empresa.com`) y la **contraseña** es la del tenant de Azure AD (la misma que se usa para el MFA interactivo).
+
+#### Variables completas para Docker en `.env`
+
+```bash
+DB_SERVER=workspace-id.datawarehouse.fabric.microsoft.com
+DB_DATABASE=nombre-del-warehouse
+DB_AUTH_MODE=sql
+DB_USER=usuario@empresa.com
+DB_PASSWORD=contraseña-de-azure-ad
+```
+
+#### Verificar que la conexión funciona
+
+Después de completar el `.env` y levantar los contenedores, probá el health check:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Luego mandá un mensaje de interacción simple (sin datos) para aislar si el problema es la BD o el LLM:
+
+```bash
+curl -X POST http://localhost:8000/chat/ \
+  -H "Content-Type: application/json" \
+  -d '{"message": "hola", "session_id": "test", "franchise_id": "test"}'
+```
+
+Si responde correctamente → el LLM funciona. Luego probá con una consulta de datos real.
+
+#### Troubleshooting
+
+| Error en logs | Causa | Solución |
+|---------------|-------|----------|
+| `Login failed for user` | Credenciales incorrectas | Verificar `DB_USER` y `DB_PASSWORD` |
+| `Cannot open server ... requested by the login` | `DB_SERVER` incorrecto | Copiar exactamente desde el portal de Fabric |
+| `SSL Provider error` | Falta `Encrypt=yes` | Ya está en `connection.py`, no requiere cambio |
+| `timeout expired` | Red bloqueada o VPN necesaria | Verificar que tu máquina accede a Fabric sin Docker primero |
+
+---
+
 ### Comandos
 
 #### Levantar todo (primera vez o después de cambios en `requirements.txt`)
