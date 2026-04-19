@@ -1,0 +1,38 @@
+services:
+
+  # ─────────────────────────────────────────────────────────────
+  # API — simula Azure Container Apps
+  # Accesible en: http://localhost:8000
+  # Docs:         http://localhost:8000/docs
+  # ─────────────────────────────────────────────────────────────
+  api:
+    build: .
+    container_name: chatbot-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env                          # usa tu .env local existente
+    volumes:
+      - ./app:/app/app                # hot reload del código
+      - ./context:/app/context        # business_rules.md editable en vivo
+      - ./logs:/app/logs              # logs accesibles desde host
+      - ./memory.db:/app/memory.db    # SQLite persistente entre reinicios
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────
+  # FRONTEND — simula Azure CDN + Blob Storage (static hosting)
+  # Sirve ui_test/index.html como si fuera un CDN estático.
+  # Accesible en: http://localhost:3000
+  # ─────────────────────────────────────────────────────────────
+  frontend:
+    image: nginx:alpine
+    container_name: chatbot-frontend
+    ports:
+      - "3000:80"
+    volumes:
+      - ./ui_test:/usr/share/nginx/html:ro   # archivos estáticos (read-only)
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    restart: unless-stopped

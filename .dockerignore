@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+.stubs/
+
+# Datos locales (no van en la imagen)
+memory.db
+logs/
+
+# Env files
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+
+# Docs y extras
+*.md
+EXTRA_INFO/
+sql/
+tests/
+chatbot_multiagent_architecture.svg
+
+# Docker
+docker-compose*.yml
+nginx/
+
+# Azure / AI tools
+.azure/
+.gemini/
+.claude/
+.opencode/
+.vfsmeta/
