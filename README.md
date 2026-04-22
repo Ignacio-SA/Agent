@@ -10,6 +10,7 @@ Cliente (UI Web / API)
 FastAPI Gateway
     ↓
 Orchestrator Agent (Claude Sonnet — decide qué agente responde)
+    ├→ Comparative Agent (Haiku — comparativas entre dos períodos)
     ├→ Data Agent        (Haiku — Text-to-SQL sobre datos de ventas)
     ├→ Interaction Agent (Haiku — conversación básica del negocio)
     ├→ off_topic         (respuesta fija sin LLM — 0 tokens)
@@ -166,6 +167,7 @@ Agent/
 ├── app/
 │   ├── agents/
 │   │   ├── orchestrator.py      # Decide qué agente responde
+│   │   ├── comparative_agent.py # Comparativas entre dos períodos
 │   │   ├── data_agent.py        # Text-to-SQL sobre ventas
 │   │   ├── interaction.py       # Conversación general
 │   │   └── memory_agent.py      # Resumen y contexto
@@ -212,11 +214,12 @@ Para agregar una nueva regla de negocio, editar `context/business_rules.md` — 
 ## Agentes
 
 ### Orchestrator (Claude Sonnet)
-Clasifica cada mensaje en uno de cuatro tipos:
+Clasifica cada mensaje en uno de cinco tipos:
 
 | Tipo | Descripción | Costo |
 |---|---|---|
-| `data` | Consultas de ventas, productos, precios, reportes | Alto (hasta 3 LLM calls) |
+| `comparative` | Comparativas entre dos períodos ("esta semana vs la semana pasada") | Medio (2 LLM calls) |
+| `data` | Consultas de ventas de un solo período, productos, precios, reportes | Alto (hasta 3 LLM calls) |
 | `interaction` | Saludos, preguntas sobre el chatbot | Bajo (1 LLM call, 200 tokens) |
 | `off_topic` | Programación, clima, traducciones, etc. | Cero (respuesta fija, 0 tokens) |
 | `memory` | "¿Qué hablamos antes?" | Mínimo (solo lectura DB) |
@@ -224,6 +227,16 @@ Clasifica cada mensaje en uno de cuatro tipos:
 Cada consulta registra el consumo real de tokens (input + output, por agente) en la tabla `query_logs` del SQLite local. Consultable via `GET /debug/token-logs`.
 
 Usa palabras clave como fallback si el LLM no responde en formato JSON válido. El default de fallback es `off_topic` (no `interaction`) para evitar gastar tokens en mensajes irrelevantes.
+
+### Comparative Agent (Claude Haiku)
+Maneja consultas que comparan dos períodos ("ayer vs antes de ayer", "enero vs febrero"). Pipeline:
+1. LLM extrae los dos períodos del mensaje (labels + rangos de fecha)
+2. Un solo llamado al SP cubriendo el rango completo de ambos períodos
+3. Carga los datos en SQLite en memoria
+4. Calcula métricas en Python para cada período por separado (reutiliza `_compute_summary` del Data Agent)
+5. LLM formatea la comparativa con tabla de deltas, desglose por vendedor, top productos y conclusión
+
+Reutiliza `_load_into_memory` y `_compute_summary` del Data Agent — sin duplicar lógica.
 
 ### Data Agent (Claude Haiku)
 1. Extrae el rango de fechas con detección Python primero (hoy/ayer/esta semana/semana pasada/este mes) y LLM como fallback para fechas específicas — el contexto de conversación previa se inyecta para mantener el período en preguntas de seguimiento ("haz un desglose por items" después de "ventas del 01/12")

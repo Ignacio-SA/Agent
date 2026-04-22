@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from ..agents.comparative_agent import comparative_agent
 from ..agents.data_agent import data_agent
 from ..agents.interaction import interaction_agent
 from ..agents.memory_agent import memory_agent
@@ -34,7 +35,9 @@ async def chat(request: ChatRequest):
 
         # Invocar agente correspondiente
         agent_in = agent_out = 0
-        if agent_type == "data":
+        if agent_type == "comparative":
+            response_text, agent_in, agent_out = comparative_agent.process_comparative_request(request.message, request.franchise_id, memory_context, request.session_id)
+        elif agent_type == "data":
             response_text, agent_in, agent_out = data_agent.process_data_request(request.message, request.franchise_id, memory_context, request.session_id)
         elif agent_type == "memory":
             response_text = f"Recordando: {memory_context}"

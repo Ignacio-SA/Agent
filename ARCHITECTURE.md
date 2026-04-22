@@ -33,7 +33,8 @@ Agent/
 │   ├── config.py                 # Variables de entorno (via pydantic-settings)
 │   ├── agents/                   # Los agentes de IA
 │   │   ├── orchestrator.py       # Decide qué agente responde cada mensaje
-│   │   ├── data_agent.py         # Consulta y analiza datos de ventas
+│   │   ├── comparative_agent.py  # Comparativas entre dos períodos de ventas
+│   │   ├── data_agent.py         # Consulta y analiza datos de ventas (un período)
 │   │   ├── interaction.py        # Responde conversación general del negocio
 │   │   └── memory_agent.py       # Genera y recupera resúmenes de sesión
 │   ├── routers/
@@ -75,10 +76,11 @@ Agent/
         │
         ▼
 3. OrchestratorAgent.decide_agent(mensaje)
-   ├─ "data"       → DataAgent
+   ├─ "comparative" → ComparativeAgent
+   ├─ "data"        → DataAgent
    ├─ "interaction" → InteractionAgent
-   ├─ "off_topic"  → Respuesta fija (sin LLM, 0 tokens de generación)
-   └─ "memory"     → Devuelve resumen guardado
+   ├─ "off_topic"   → Respuesta fija (sin LLM, 0 tokens de generación)
+   └─ "memory"      → Devuelve resumen guardado
         │
         ▼ (si es "data")
 4. DataAgent.process_data_request()
@@ -129,12 +131,43 @@ Usa **Claude Sonnet** para clasificar cada mensaje en una de estas categorías:
 
 | Tipo | Cuándo | Costo |
 |------|--------|-------|
-| `data` | Consultas de ventas, productos, precios, reportes | Alto (3 llamadas LLM) |
+| `comparative` | Comparativas entre dos períodos ("esta semana vs la semana pasada") | Medio (2 llamadas LLM) |
+| `data` | Consultas de ventas de un período, productos, precios, reportes | Alto (hasta 3 llamadas LLM) |
 | `interaction` | Saludos, preguntas sobre el chatbot | Bajo (1 llamada LLM, 200 tokens) |
 | `off_topic` | Todo lo demás | Cero (respuesta hardcodeada) |
 | `memory` | "¿Qué hablamos antes?" | Bajo (solo lectura de DB) |
 
-El fallback por keywords evita llamadas extra si el LLM falla en retornar JSON válido.
+El fallback por keywords evalúa `comparative` primero (palabras clave: `vs`, `versus`, `comparar`, `compará`, `diferencia entre`, `contra`) antes de caer a `data`.
+
+---
+
+### `app/agents/comparative_agent.py` — El comparador
+
+Maneja consultas que involucran **dos períodos** ("ayer vs antes de ayer", "enero vs febrero"). Pipeline:
+
+```
+Pregunta comparativa
+      │
+      ▼
+_extract_two_periods() — LLM extrae ambos períodos con labels y filtros SQL
+      │
+      ▼
+SP en Fabric — UN solo call con el rango completo (min_from → max_to)
+      │
+      ▼
+_load_into_memory() — carga en SQLite (reutiliza DataAgent)
+      │
+      ▼
+_compute_summary(date_filter_a) → summary_a   ┐ reutiliza DataAgent
+_compute_summary(date_filter_b) → summary_b   ┘
+      │
+      ▼
+_format_comparative_response() — LLM presenta tabla de deltas + conclusión
+```
+
+**Reutilización:** Llama directamente a `data_agent._load_into_memory()` y `data_agent._compute_summary()` — no duplica esa lógica. Solo agrega la extracción de dos períodos y el formato comparativo.
+
+**Costo:** 2 LLM calls (extracción de períodos + formato) y 1 llamado al SP — más eficiente que dos consultas `data` separadas.
 
 ---
 
@@ -458,6 +491,14 @@ Spark excluye canceladas via `Cloud_StateHistory WHERE Code = 'Cancelled'`. El S
 ### ¿Por qué se pasa el contexto de sesión al Data Agent?
 
 Sin contexto, cada mensaje se procesa de forma aislada. Si el usuario pregunta "ventas del 01/12" y luego "haz un desglose por items", la segunda pregunta no tiene fecha → el agente trae el año completo → el SQL falla o es incorrecto. Pasando el resumen de sesión como contexto a `_extract_date_range` y `_generate_sql`, el LLM puede inferir el período correcto de la conversación previa.
+
+### ¿Por qué el ComparativeAgent reutiliza métodos del DataAgent en lugar de tener los suyos?
+
+`_load_into_memory` y `_compute_summary` son lógica de datos pura (no de dominio del agente). Duplicarlos significaría mantener dos implementaciones que deben mantenerse en sincronía. Al llamar directamente `data_agent._load_into_memory()` y `data_agent._compute_summary()`, cualquier mejora futura al cálculo de métricas beneficia a ambos agentes automáticamente.
+
+### ¿Por qué el ComparativeAgent hace un solo llamado al SP y no dos?
+
+Un llamado al SP por período implicaría dos round-trips a Fabric Warehouse, que es la operación más lenta del pipeline (~1-3 segundos cada una). Al traer el rango completo en un solo call y filtrar en SQLite, se reduce la latencia total a la mitad manteniendo los resultados idénticos.
 
 ### ¿Por qué se agregan CtaChannel, VtaOperation, Plataforma y FormaPago al SP?
 

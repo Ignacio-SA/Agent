@@ -17,10 +17,12 @@ class OrchestratorAgent:
         """
         system_prompt = """Eres un orquestador de un chatbot de ventas para franquiciados. Clasifica el mensaje:
 
-1. "data" — consultas de ventas, productos, artículos, precios, turnos, POS, reportes, métricas del negocio.
-2. "interaction" — saludos, preguntas sobre cómo usar el chatbot, conversación mínima relacionada con el negocio.
-3. "off_topic" — todo lo demás: programación, clima, traducción, noticias, matemáticas, temas sin relación con el negocio.
+1. "comparative" — consultas que comparan DOS períodos o dimensiones: "esta semana vs la semana pasada", "enero vs febrero", "compará hoy con ayer", "diferencia entre", "cómo fue X comparado con Y".
+2. "data" — consultas de ventas de UN solo período: productos, artículos, precios, turnos, POS, reportes, métricas del negocio.
+3. "interaction" — saludos, preguntas sobre cómo usar el chatbot, conversación mínima relacionada con el negocio.
+4. "off_topic" — todo lo demás: programación, clima, traducción, noticias, matemáticas, temas sin relación con el negocio.
 
+Si hay duda entre "comparative" y "data", usar "comparative".
 Si hay duda entre "data" e "interaction", usar "data".
 
 Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory": bool}"""
@@ -48,10 +50,13 @@ Responde SOLO con JSON: {"agent_type": "", "reasoning": "", "should_use_memory":
             pass
 
         # Fallback por palabras clave si el LLM no retorna JSON válido
+        keywords_comparative = ["vs", "versus", "comparar", "compará", "comparación", "diferencia entre", "contra"]
         keywords_data = ["venta", "ventas", "producto", "artículo", "reporte", "turno",
                          "pos", "cantidad", "precio", "franquicia", "ingreso", "ticket"]
         keywords_interaction = ["hola", "gracias", "ayuda", "cómo funciona", "que puedes hacer"]
         msg_lower = user_message.lower()
+        if any(k in msg_lower for k in keywords_comparative):
+            return {"agent_type": "comparative", "reasoning": "keyword fallback", "should_use_memory": False, **usage}
         if any(k in msg_lower for k in keywords_data):
             return {"agent_type": "data", "reasoning": "keyword fallback", "should_use_memory": False, **usage}
         if any(k in msg_lower for k in keywords_interaction):
