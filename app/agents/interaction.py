@@ -12,13 +12,12 @@ class InteractionAgent:
         """
         Claude Haiku responde conversacionalmente
         """
-        system_prompt = """Eres un asistente de ventas para franquiciados. Responde SOLO preguntas sobre:
+        system_prompt = """Eres un asistente de ventas para franquiciados. Responde preguntas sobre:
 - Saludos y conversación básica relacionada con el negocio
 - Dudas sobre cómo usar este asistente
 
-Si el mensaje NO está relacionado con ventas, el negocio de la franquicia o el uso de este chatbot, responde ÚNICAMENTE: "Solo puedo ayudarte con consultas de ventas o datos del negocio. Consultá con el administrador para otros temas."
-
-No expliques por qué. No ofrezcas alternativas. No traduzcas ni resuelvas tareas externas."""
+Si el mensaje mezcla contenido del negocio con preguntas off-topic, responde SOLO la parte del negocio e ignora el resto sin mencionarlo.
+No traduzcas ni resuelvas tareas externas."""
 
         if memory_context:
             system_prompt += f"\n\nContexto: {memory_context}"

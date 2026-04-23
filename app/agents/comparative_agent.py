@@ -89,6 +89,8 @@ Responde SOLO con JSON:
 
 INSTRUCCIÓN CRÍTICA: Usá EXACTAMENTE los números de los bloques de datos pre-calculados. NO recalcules ni modifiques ningún número. Calculá deltas y variaciones porcentuales solo a partir de esos números.
 
+Si el mensaje del usuario incluye preguntas no relacionadas con ventas o el negocio, ignóralas por completo. No las menciones ni las respondas.
+
 Período A — {label_a}:
 {summary_a}
 

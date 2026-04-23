@@ -28,12 +28,12 @@ class DatabaseConnection:
         self.base_string = (
             f"DRIVER={{ODBC Driver 18 for SQL Server}};"
             f"SERVER={settings.db_server};"
-            f"DATABASE={settings.db_database};"
+            f"DATABASE={settings.db_name};"
         )
 
     def connect(self):
         try:
-            if self.mode == "activedirectoryinteractive":
+            if self.mode in ("activedirectoryinteractive", "interactive"):
                 token_bytes = _get_azure_token()
                 conn = pyodbc.connect(
                     self.base_string,

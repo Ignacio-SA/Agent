@@ -1,508 +1,552 @@
 <!DOCTYPE html>
-<html lang="es">
+<html class="light" lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chatbot Multi-Agente</title>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+  <title>SmartFran Cloud - Asistente</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "tertiary-fixed":             "#6bf6ff",
+            "on-tertiary-container":      "#d8fdff",
+            "surface-container-low":      "#f8f1ff",
+            "background":                 "#fdf7ff",
+            "tertiary-container":         "#007d83",
+            "secondary-fixed":            "#e8ddff",
+            "on-secondary-fixed-variant": "#4b3e73",
+            "inverse-primary":            "#e6b4ff",
+            "on-secondary-fixed":         "#1f1144",
+            "error-container":            "#ffdad6",
+            "on-secondary":               "#ffffff",
+            "surface-container-high":     "#ede4ff",
+            "on-primary-container":       "#fef1ff",
+            "on-error":                   "#ffffff",
+            "secondary-fixed-dim":        "#cebefb",
+            "outline-variant":            "#d3c0d8",
+            "on-primary-fixed":           "#30004a",
+            "outline":                    "#817287",
+            "on-background":              "#1f1144",
+            "surface-tint":               "#9300d9",
+            "inverse-surface":            "#35285b",
+            "error":                      "#ba1a1a",
+            "surface-container-lowest":   "#ffffff",
+            "primary":                    "#8a00cb",
+            "on-primary":                 "#ffffff",
+            "inverse-on-surface":         "#f5eeff",
+            "surface-dim":                "#e0d4ff",
+            "tertiary-fixed-dim":         "#40dae3",
+            "surface-bright":             "#fdf7ff",
+            "on-tertiary-fixed-variant":  "#004f53",
+            "on-secondary-container":     "#594c81",
+            "primary-fixed":              "#f5d9ff",
+            "on-surface":                 "#1f1144",
+            "surface-container-highest":  "#e8ddff",
+            "on-primary-fixed-variant":   "#7000a6",
+            "primary-fixed-dim":          "#e6b4ff",
+            "on-tertiary-fixed":          "#002022",
+            "on-error-container":         "#93000a",
+            "on-tertiary":                "#ffffff",
+            "surface-container":          "#f3eaff",
+            "surface":                    "#fdf7ff",
+            "primary-container":          "#ae00ff",
+            "secondary":                  "#63568c",
+            "surface-variant":            "#e8ddff",
+            "on-surface-variant":         "#4f4255",
+            "tertiary":                   "#006267",
+            "secondary-container":        "#d0c0fe"
+          },
+          fontFamily: {
+            "headline": ["Plus Jakarta Sans"],
+            "body":     ["Manrope"],
+            "label":    ["Manrope"]
+          },
+          borderRadius: {
+            "DEFAULT": "1rem",
+            "lg":      "2rem",
+            "xl":      "3rem",
+            "full":    "9999px"
+          },
+        },
+      },
+    }
+  </script>
 
-        .container {
-            width: 100%;
-            max-width: 700px;
-            height: 90vh;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
+  <style>
+    body { font-family: 'Manrope', sans-serif; }
+    h1, h2, h3, .font-headline { font-family: 'Plus Jakarta Sans', sans-serif; }
 
-        .header {
-            background: #667eea;
-            color: white;
-            padding: 16px 20px;
-            border-radius: 12px 12px 0 0;
-        }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      vertical-align: middle;
+    }
 
-        .header h1 { font-size: 20px; margin-bottom: 10px; text-align: center; }
+    /* ── Fondo exterior — idéntico al login (deep space) ── */
+    .bg-deep-space { background: radial-gradient(circle at top right, #35285b, #0f0035); }
+    .glow-accent   { filter: blur(80px); background: #ae00ff; opacity: 0.15; }
 
-        .header-config {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
+    /* ── Card del chat — igual a solicitud-enviada.html ── */
+    /* bg-mesh claro + glass opaco sobre él                  */
+    .chat-card {
+      background-color: #fdf7ff;
+      background-image:
+        radial-gradient(at 0% 0%,   hsla(274,100%,90%,1) 0, transparent 50%),
+        radial-gradient(at 50% 0%,  hsla(281,100%,85%,1) 0, transparent 50%),
+        radial-gradient(at 100% 0%, hsla(262,100%,92%,1) 0, transparent 50%);
+    }
 
-        .header-config label { font-size: 12px; opacity: 0.9; white-space: nowrap; }
+    /* ── Header / Footer de la card — glass claro ── */
+    /* Igual que .glass-card de solicitud-enviada pero como
+       franja interna de la card ya clara.                   */
+    .panel-header {
+      background: rgba(253, 247, 255, 0.82);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border-bottom: 1px solid rgba(211, 192, 216, 0.30);
+    }
+    .panel-footer {
+      background: rgba(253, 247, 255, 0.82);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border-top: 1px solid rgba(211, 192, 216, 0.30);
+    }
 
-        .header-config input {
-            flex: 1;
-            padding: 6px 10px;
-            border-radius: 6px;
-            border: none;
-            font-size: 12px;
-            background: rgba(255,255,255,0.2);
-            color: white;
-            outline: none;
-        }
+    .signature-gradient { background: linear-gradient(135deg, #5a45d4 0%, #6e59ee 100%); }
 
-        .header-config input::placeholder { color: rgba(255,255,255,0.6); }
+    /* ── Scrollbar light ── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d3c0d8; border-radius: 10px; }
 
-        .btn-sessions {
-            padding: 5px 10px;
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: 1px solid rgba(255,255,255,0.4);
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 11px;
-            white-space: nowrap;
-            transition: background 0.2s;
-        }
-        .btn-sessions:hover { background: rgba(255,255,255,0.35); }
+    /* ── Status dot ── */
+    @keyframes pulse-dot {
+      0%,100% { box-shadow: 0 0 0 2px rgba(0,98,103,0.2); }
+      50%      { box-shadow: 0 0 0 5px rgba(0,98,103,0); }
+    }
+    .status-dot { animation: pulse-dot 2.5s ease infinite; }
 
-        .sessions-panel {
-            display: none;
-            position: absolute;
-            top: 100px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 90%;
-            max-width: 640px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
-            z-index: 100;
-            max-height: 350px;
-            overflow-y: auto;
-        }
-        .sessions-panel h3 {
-            padding: 14px 16px;
-            font-size: 14px;
-            border-bottom: 1px solid #eee;
-            color: #333;
-            position: sticky;
-            top: 0;
-            background: white;
-        }
-        .session-item {
-            padding: 12px 16px;
-            border-bottom: 1px solid #f0f0f0;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        .session-item:hover { background: #f7f8fc; }
-        .session-item.active { background: #eef0ff; }
-        .session-item .session-id { font-size: 12px; color: #667eea; font-weight: 600; }
-        .session-item .session-meta { font-size: 11px; color: #999; margin-top: 2px; }
-        .session-item .session-summary { font-size: 12px; color: #555; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .session-item .session-actions { display: flex; gap: 6px; margin-top: 6px; }
-        .btn-delete-session {
-            font-size: 11px; padding: 2px 8px;
-            background: #fee2e2; color: #dc2626;
-            border: 1px solid #fca5a5; border-radius: 4px;
-            cursor: pointer;
-        }
-        .btn-delete-session:hover { background: #fca5a5; }
-        .sessions-empty { padding: 20px; text-align: center; color: #999; font-size: 13px; }
+    /* ── Message entrance ── */
+    @keyframes msg-in {
+      from { opacity:0; transform: translateY(10px) scale(0.97); }
+      to   { opacity:1; transform: translateY(0) scale(1); }
+    }
+    .msg-in { animation: msg-in 0.28s cubic-bezier(0.34,1.4,0.64,1) both; }
 
-        .btn-new-session {
-            padding: 5px 10px;
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: 1px solid rgba(255,255,255,0.4);
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 11px;
-            white-space: nowrap;
-            transition: background 0.2s;
-        }
-        .btn-new-session:hover { background: rgba(255,255,255,0.35); }
+    /* ── Typing dots ── */
+    @keyframes bounce-dot {
+      0%,60%,100% { transform:translateY(0); opacity:0.45; }
+      30%          { transform:translateY(-5px); opacity:1; }
+    }
+    .dot-1 { animation: bounce-dot 1.3s ease infinite; }
+    .dot-2 { animation: bounce-dot 1.3s 0.18s ease infinite; }
+    .dot-3 { animation: bounce-dot 1.3s 0.36s ease infinite; }
 
-        .chat-messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            background: #f7f8fc;
-        }
+    /* ══════════════════════════════════════════════════════
+       ÁREA DE MENSAJES
+       Fondo: surface-container-low del design system
+       (#f8f1ff) — mismo token que usa venta-minorista.
+    ══════════════════════════════════════════════════════ */
+    /* .chat-bg {
+      background-color: #f3eaff;
+      /* Trama geométrica muy sutil — no compite con el texto
+      background-image:
+        repeating-linear-gradient(0deg,  transparent, transparent 39px, rgba(138,0,203,0.035) 39px, rgba(138,0,203,0.035) 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(138,0,203,0.035) 39px, rgba(138,0,203,0.035) 40px);
+    } */
 
-        .message {
-            margin-bottom: 15px;
-            display: flex;
-            gap: 10px;
-        }
+    .chat-bg {
+      background-color: #f3eaff;
+      background-image: radial-gradient(circle, rgba(138,0,203,0.12) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
 
-        .message.user { justify-content: flex-end; }
+    /* ══════════════════════════════════════════════════════
+       BURBUJAS — modo claro, tokens del design system
+    ══════════════════════════════════════════════════════ */
 
-        .message-content {
-            max-width: 80%;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-size: 14px;
-            line-height: 1.5;
-            word-wrap: break-word;
-        }
+    /* BOT — superficie blanca (#fff) con sombra ambient.
+       Texto: on-surface (#1f1144). Contraste ≥ 14:1. */
+    .bubble-bot {
+      background: #ffffff;
+      color: #1f1144;
+      border-radius: 0.375rem 1.5rem 1.5rem 1.5rem;
+      box-shadow:
+        0 1px 2px rgba(31,17,68,0.06),
+        0 4px 16px rgba(31,17,68,0.08);
+    }
 
-        .message.user .message-content {
-            background: #667eea;
-            color: white;
-            border-radius: 8px 8px 0 8px;
-        }
+    /* USER — signature gradient + texto blanco.
+       Contraste ≥ 4.5:1 sobre el gradiente. */
+    .bubble-user {
+      background: #d8d1ff;
+      color: #1f1144;
+      border-radius: 1.5rem 0.375rem 1.5rem 1.5rem;
+      box-shadow:
+        0 1px 2px rgba(31,17,68,0.10),
+        0 4px 20px rgba(138,0,203,0.22);
+    }
 
-        .message.bot .message-content {
-            background: white;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px 8px 8px 0;
-        }
+    /* ── Markdown — bot (light) ── */
+    .bubble-bot h1,.bubble-bot h2,.bubble-bot h3 {
+      font-family:'Plus Jakarta Sans',sans-serif; font-weight:700;
+      color:#1f1144; margin:10px 0 5px; font-size:.9rem; line-height:1.3;
+    }
+    .bubble-bot p   { margin-bottom:6px; color:#1f1144; }
+    .bubble-bot ul,.bubble-bot ol { padding-left:1.2rem; margin-bottom:6px; color:#1f1144; }
+    .bubble-bot li  { margin-bottom:3px; }
+    .bubble-bot strong { font-weight:700; color:#5a008a; }
+    .bubble-bot a   { color:#8a00cb; text-decoration:underline; }
+    .bubble-bot code {
+      background:#f3eaff; color:#7000a6;
+      padding:2px 6px; border-radius:5px; font-size:.78rem;
+      border:1px solid #e8ddff;
+    }
+    .bubble-bot pre {
+      background:#f8f1ff; border-radius:.75rem; padding:10px 12px;
+      margin:8px 0; overflow-x:auto; border:1px solid #e8ddff;
+    }
+    .bubble-bot pre code { background:transparent; border:none; padding:0; color:#4f4255; font-size:.78rem; }
+    .bubble-bot table { width:100%; border-collapse:collapse; margin:8px 0; font-size:.78rem; border-radius:.75rem; overflow:hidden; }
+    .bubble-bot th  { background:#ede4ff; color:#1f1144; font-weight:700; padding:7px 11px; text-align:left; font-family:'Plus Jakarta Sans',sans-serif; font-size:.75rem; letter-spacing:.02em; }
+    .bubble-bot td  { background:#f8f1ff; color:#1f1144; padding:7px 11px; text-align:left; border-top:1px solid #e8ddff; }
+    .bubble-bot blockquote { border-left:3px solid #d3c0d8; padding-left:10px; margin:6px 0; color:#4f4255; font-style:italic; }
+    .bubble-bot hr  { border:none; border-top:1px solid #e8ddff; margin:10px 0; }
 
-        /* Markdown styles dentro de mensajes */
-        .message-content h1, .message-content h2, .message-content h3 {
-            margin: 8px 0 4px;
-            font-size: 15px;
-        }
-        .message-content p { margin-bottom: 6px; }
-        .message-content ul, .message-content ol { padding-left: 18px; margin-bottom: 6px; }
-        .message-content li { margin-bottom: 2px; }
-        .message-content table {
-            border-collapse: collapse;
-            width: 100%;
-            margin: 8px 0;
-            font-size: 13px;
-        }
-        .message-content th, .message-content td {
-            border: 1px solid #ddd;
-            padding: 6px 10px;
-            text-align: left;
-        }
-        .message-content th { background: #f0f0f0; font-weight: 600; }
-        .message-content strong { font-weight: 600; }
-        .message-content code {
-            background: #f0f0f0;
-            padding: 1px 4px;
-            border-radius: 3px;
-            font-size: 12px;
-        }
+    /* ── Markdown — user (sobre gradient oscuro) ── */
+    .bubble-user h1,.bubble-user h2,.bubble-user h3 {
+      font-family:'Plus Jakarta Sans',sans-serif; font-weight:700;
+      color: #1f1144; margin:10px 0 5px; font-size:.9rem; line-height:1.3;
+    }
+    .bubble-user p   { margin-bottom:6px; color: #1f1144; }
+    .bubble-user ul,.bubble-user ol { padding-left:1.2rem; margin-bottom:6px; color: #1f1144; }
+    .bubble-user li  { margin-bottom:3px; }
+    .bubble-user strong { font-weight:700; color: #30004a; }
+    .bubble-user code {
+      background:rgba(0,0,0,0.20); color:#ffe0ff;
+      padding:2px 6px; border-radius:5px; font-size:.78rem;
+    }
+    .bubble-user pre { background:rgba(0,0,0,0.22); border-radius:.75rem; padding:10px 12px; margin:8px 0; overflow-x:auto; }
+    .bubble-user pre code { background:transparent; border:none; padding:0; color:rgba(255,255,255,0.9); font-size:.78rem; }
+    .bubble-user table { width:100%; border-collapse:collapse; margin:8px 0; font-size:.78rem; border-radius:.75rem; overflow:hidden; }
+    .bubble-user th { background:rgba(0,0,0,0.25); color:#ffe0ff; font-weight:700; padding:7px 11px; text-align:left; font-size:.75rem; }
+    .bubble-user td { background:rgba(0,0,0,0.12); color:#fff; padding:7px 11px; border-top:1px solid rgba(255,255,255,0.1); }
+    .bubble-user blockquote { border-left:3px solid rgba(255,255,255,0.4); padding-left:10px; margin:6px 0; color:rgba(255,255,255,0.85); font-style:italic; }
+    .bubble-user hr { border:none; border-top:1px solid rgba(255,255,255,0.2); margin:10px 0; }
 
-        .agent-badge {
-            font-size: 11px;
-            margin-top: 6px;
-            opacity: 0.6;
-            font-weight: 500;
-        }
+    /* ── Sessions panel ── */
+    .sessions-panel {
+      display: none;
+      position: absolute;
+      top: 116px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 88%;
+      max-width: 600px;
+      z-index: 50;
+    }
 
-        .input-section {
-            padding: 12px 15px;
-            border-top: 1px solid #e0e0e0;
-            display: flex;
-            gap: 8px;
-        }
-
-        .input-section input {
-            flex: 1;
-            padding: 10px 15px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 14px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-
-        .input-section input:focus { border-color: #667eea; }
-
-        button {
-            padding: 10px 20px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: background 0.2s;
-        }
-
-        button:hover { background: #5568d3; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-
-        .typing {
-            display: flex;
-            gap: 4px;
-            padding: 12px 16px;
-            background: white;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px 8px 8px 0;
-            width: fit-content;
-        }
-
-        .typing span {
-            width: 8px; height: 8px;
-            background: #667eea;
-            border-radius: 50%;
-            animation: bounce 1.2s infinite;
-        }
-        .typing span:nth-child(2) { animation-delay: 0.2s; }
-        .typing span:nth-child(3) { animation-delay: 0.4s; }
-
-        @keyframes bounce {
-            0%, 60%, 100% { transform: translateY(0); }
-            30% { transform: translateY(-6px); }
-        }
-    </style>
+    /* ── Sessions panel card (light) ── */
+    .sessions-card {
+      background: rgba(253, 247, 255, 0.96);
+      backdrop-filter: blur(32px);
+      -webkit-backdrop-filter: blur(32px);
+      border: 1px solid rgba(211, 192, 216, 0.40);
+      box-shadow: 0 20px 60px rgba(31,17,68,0.14), 0 4px 16px rgba(138,0,203,0.06);
+    }
+  </style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Chatbot Multi-Agente</h1>
-            <div class="header-config">
-                <label>Franchise ID:</label>
-                <input type="text" id="franchiseInput" placeholder="Ingresa tu Franchise ID..." />
-                <button class="btn-sessions" onclick="toggleSessions()">Sesiones</button>
-                <button class="btn-new-session" onclick="newSession()">+ Nueva</button>
+
+<body class="font-body text-on-background min-h-screen flex items-center justify-center overflow-hidden">
+
+  <!-- ── Fondo exterior deep space — idéntico al login ── -->
+  <div class="fixed inset-0 bg-deep-space -z-10"></div>
+  <div class="fixed top-[-10%] right-[-10%] w-[40rem] h-[40rem] rounded-full glow-accent -z-10"></div>
+  <div class="fixed bottom-[-20%] left-[-10%] w-[50rem] h-[50rem] rounded-full glow-accent -z-10" style="background:#8a00cb;"></div>
+  <div class="hidden lg:block fixed top-20 left-20 w-32 h-32 rounded-lg opacity-10 rotate-12 bg-primary -z-10"></div>
+  <div class="hidden lg:block fixed bottom-40 right-40 w-48 h-48 rounded-full opacity-5 -z-10" style="background:#6bf6ff;"></div>
+
+  <!-- ── Chat container ── -->
+  <main class="relative z-10 w-full max-w-2xl px-4 py-6 flex flex-col" style="height:100svh;">
+
+    <!-- Card principal — light, igual a solicitud-enviada -->
+    <div class="chat-card rounded-lg flex flex-col flex-1 overflow-hidden relative
+                shadow-2xl shadow-on-background/40
+                border border-white/60"
+         style="min-height:0;">
+
+      <!-- Luz decorativa top-right (igual a la card de solicitud-enviada) -->
+      <div class="absolute -top-16 -right-16 w-40 h-40 bg-primary-container/15 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="absolute -bottom-16 -left-16 w-40 h-40 bg-tertiary/8  rounded-full blur-3xl pointer-events-none"></div>
+
+      <!-- ══ HEADER ══ -->
+      <header class="panel-header rounded-t-lg px-6 py-4 flex-shrink-0 relative z-10">
+        <div class="flex items-center justify-between mb-3.5">
+          <!-- Brand -->
+          <div class="flex items-center gap-3">
+            <img src="./Nacho.svg" alt="smartfran" class="w-10 h-10 rounded-full object-cover" />
+              <div>
+                <p class="font-headline font-bold text-on-background leading-tight tracking-tight" style="font-size:1rem;">
+                  Asistente Smart-IA
+              </p>
+              <p class="font-label text-[0.67rem] text-on-surface-variant font-medium flex items-center gap-1.5 mt-0.5">
+                <span class="status-dot w-1.5 h-1.5 rounded-full bg-tertiary inline-block flex-shrink-0"></span>
+                En línea · Cloud POS
+              </p>
             </div>
+          </div>
+          <!-- Acciones -->
+          <div class="flex items-center gap-1">
+            <button onclick="toggleSessions()"
+              class="flex items-center gap-1 px-3 py-1.5 rounded-full text-primary/70 hover:text-primary hover:bg-primary/8 transition-all text-xs font-semibold font-label">
+              <span class="material-symbols-outlined text-[14px]">history</span>
+              Sesiones
+            </button>
+            <button onclick="newSession()"
+              class="flex items-center gap-1 px-3 py-1.5 rounded-full text-primary/70 hover:text-primary hover:bg-primary/8 transition-all text-xs font-semibold font-label">
+              <span class="material-symbols-outlined text-[14px]">add</span>
+              Nueva
+            </button>
+          </div>
         </div>
 
-        <div class="sessions-panel" id="sessionsPanel">
-            <h3>Sesiones guardadas</h3>
-            <div id="sessionsList"></div>
+        <!-- Franchise ID input -->
+        <div class="relative group">
+          <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant/40 group-focus-within:text-primary transition-colors text-[15px]">badge</span>
+          <input
+            id="franchiseInput" type="text" placeholder="Franchise ID..."
+            class="w-full bg-surface-container-high border-none rounded-full py-2.5 pl-10 pr-4 text-on-background placeholder:text-on-surface-variant/40 focus:ring-2 focus:ring-primary/20 transition-all outline-none text-sm font-label font-medium"
+          />
         </div>
+      </header>
 
-        <div class="chat-messages" id="messages"></div>
-
-        <div class="input-section">
-            <input type="text" id="messageInput" placeholder="Escribe tu mensaje..." autocomplete="off" />
-            <button id="sendBtn" onclick="sendMessage()">Enviar</button>
+      <!-- ══ SESSIONS PANEL ══ -->
+      <div class="sessions-panel" id="sessionsPanel">
+        <div class="sessions-card rounded-lg max-h-72 overflow-y-auto">
+          <p class="font-headline font-bold text-on-background text-[13px] px-5 pt-4 pb-2 sticky top-0 bg-surface/95 backdrop-blur-sm rounded-t-lg">
+            Sesiones guardadas
+          </p>
+          <div id="sessionsList"></div>
         </div>
+      </div>
+
+      <!-- ══ MENSAJES ══ -->
+      <div id="messages"
+        class="chat-bg flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-1.5"
+        style="min-height:0;">
+      </div>
+
+      <!-- ══ INPUT FOOTER ══ -->
+      <footer class="panel-footer rounded-b-xl px-4 py-3 flex items-center gap-3 flex-shrink-0">
+        <input
+          id="messageInput" type="text" placeholder="Escribí tu consulta..." autocomplete="off"
+          class="flex-1 bg-surface-container-high border-none rounded-full py-3 px-5 text-on-background placeholder:text-on-surface-variant/40 focus:ring-2 focus:ring-primary/20 transition-all outline-none text-sm font-label font-medium"
+        />
+        <button id="sendBtn" onclick="sendMessage()"
+          class="signature-gradient w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 text-white shadow-lg shadow-primary/25 hover:brightness-110 active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:brightness-75">
+          <span class="material-symbols-outlined text-[20px]"
+            style="font-variation-settings:'FILL' 1,'wght' 500,'GRAD' 0,'opsz' 24;">send</span>
+        </button>
+      </footer>
+
     </div>
+  </main>
 
-    <script>
-        const SESSION_ID = (() => {
-            let id = localStorage.getItem('session_id');
-            if (!id) {
-                id = 'session_' + Date.now();
-                localStorage.setItem('session_id', id);
-            }
-            return id;
-        })();
-        const API_URL = 'http://localhost:8000/chat/';
+  <script>
+    const SESSION_ID = (() => {
+      let id = localStorage.getItem('session_id');
+      if (!id) { id = 'session_' + Date.now(); localStorage.setItem('session_id', id); }
+      return id;
+    })();
+    const API_URL = 'http://localhost:8000/chat/';
 
-        const messageInput   = document.getElementById('messageInput');
-        const franchiseInput = document.getElementById('franchiseInput');
-        const messagesContainer = document.getElementById('messages');
-        const sendBtn = document.getElementById('sendBtn');
+    const messageInput      = document.getElementById('messageInput');
+    const franchiseInput    = document.getElementById('franchiseInput');
+    const messagesContainer = document.getElementById('messages');
+    const sendBtn           = document.getElementById('sendBtn');
 
-        // Recuperar franchise_id guardado
-        franchiseInput.value = localStorage.getItem('franchise_id') || '';
-        franchiseInput.addEventListener('change', () => {
-            localStorage.setItem('franchise_id', franchiseInput.value.trim());
+    franchiseInput.value = localStorage.getItem('franchise_id') || '';
+    franchiseInput.addEventListener('change', () => {
+      localStorage.setItem('franchise_id', franchiseInput.value.trim());
+    });
+    messageInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+
+    async function sendMessage() {
+      const message     = messageInput.value.trim();
+      const franchiseId = franchiseInput.value.trim();
+      if (!message) return;
+      if (!franchiseId) { alert('Ingresá tu Franchise ID antes de enviar.'); franchiseInput.focus(); return; }
+
+      messagesContainer.querySelector('.welcome-hint')?.remove();
+      messageInput.value = '';
+      sendBtn.disabled   = true;
+      addMessage(message, 'user');
+      const typingEl = addTyping();
+
+      try {
+        const response = await fetch(API_URL, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ message, session_id: SESSION_ID, franchise_id: franchiseId, user_id: 'ui_user' })
         });
+        typingEl.remove();
+        if (!response.ok) { const err = await response.json(); throw new Error(err.detail || 'API Error'); }
+        const data = await response.json();
+        addMessage(data.response, 'bot', data.agent_type);
+      } catch (error) {
+        typingEl.remove();
+        addMessage('Error: ' + error.message, 'bot');
+        console.error(error);
+      } finally {
+        sendBtn.disabled = false;
+        messageInput.focus();
+      }
+    }
 
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
+    function addMessage(text, role, agent = '') {
+      const wrap = document.createElement('div');
+      wrap.className = `flex msg-in mb-1 ${role === 'user' ? 'justify-end' : 'justify-start'}`;
 
-        async function sendMessage() {
-            const message = messageInput.value.trim();
-            const franchiseId = franchiseInput.value.trim();
+      const bubble = document.createElement('div');
+      bubble.className = `${role === 'user' ? 'bubble-user' : 'bubble-bot'} max-w-[80%] px-4 py-3 text-[0.84rem] leading-relaxed font-label`;
 
-            if (!message) return;
-            if (!franchiseId) {
-                alert('Ingresa tu Franchise ID antes de enviar un mensaje.');
-                franchiseInput.focus();
-                return;
-            }
+      if (role === 'bot') { bubble.innerHTML = marked.parse(text); }
+      else                { bubble.textContent = text; }
 
-            messageInput.value = '';
-            sendBtn.disabled = true;
-            addMessage(message, 'user');
+      if (agent) {
+        const badge = document.createElement('div');
+        badge.className = 'inline-flex items-center gap-1.5 mt-2.5 text-[10px] font-semibold font-label px-2.5 py-1 rounded-full';
+        badge.style.cssText = 'background:rgba(0,98,103,0.10);color:#006267;border:1px solid rgba(0,98,103,0.18);';
+        badge.innerHTML = `<span style="width:5px;height:5px;border-radius:50%;background:#006267;display:inline-block;flex-shrink:0;"></span>Agente: ${agent}`;
+        bubble.appendChild(badge);
+      }
 
-            const typingEl = addTyping();
+      wrap.appendChild(bubble);
+      messagesContainer.appendChild(wrap);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
 
-            try {
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: message,
-                        session_id: SESSION_ID,
-                        franchise_id: franchiseId,
-                        user_id: 'ui_user'
-                    })
-                });
+    function addTyping() {
+      const wrap = document.createElement('div');
+      wrap.className = 'flex justify-start msg-in mb-1';
+      wrap.innerHTML = `
+        <div class="bubble-bot px-5 py-4 flex items-center gap-2">
+          <span class="dot-1 inline-block w-2 h-2 rounded-full" style="background:#d3c0d8;"></span>
+          <span class="dot-2 inline-block w-2 h-2 rounded-full" style="background:#d3c0d8;"></span>
+          <span class="dot-3 inline-block w-2 h-2 rounded-full" style="background:#d3c0d8;"></span>
+        </div>`;
+      messagesContainer.appendChild(wrap);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      return wrap;
+    }
 
-                typingEl.remove();
+    function showWelcome() {
+      const wrap = document.createElement('div');
+      wrap.className = 'welcome-hint flex flex-col items-center justify-center flex-1 gap-3 py-10';
+      wrap.innerHTML = `
+        <img src="./Nacho.svg" alt="smartfran" class="w-20 h-20 rounded-full object-cover" />
+        <p class="font-headline font-bold text-[.85rem] text-center text-on-surface-variant/50">
+          ¡Hola! Ingresá tu Franchise ID y<br>preguntame lo que necesites.
+        </p>`;
+      messagesContainer.appendChild(wrap);
+    }
 
-                if (!response.ok) {
-                    const err = await response.json();
-                    throw new Error(err.detail || 'API Error');
-                }
+    function newSession() {
+      if (confirm('¿Iniciar una nueva sesión? Podrás volver a esta desde "Sesiones".')) {
+        localStorage.removeItem('session_id'); location.reload();
+      }
+    }
 
-                const data = await response.json();
-                addMessage(data.response, 'bot', data.agent_type);
+    async function toggleSessions() {
+      const panel = document.getElementById('sessionsPanel');
+      if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+      panel.style.display = 'block';
+      const list = document.getElementById('sessionsList');
+      list.innerHTML = `<p class="px-5 py-4 text-xs text-on-surface-variant/50 font-label">Cargando...</p>`;
 
-            } catch (error) {
-                typingEl.remove();
-                addMessage('Error: ' + error.message, 'bot');
-                console.error(error);
-            } finally {
-                sendBtn.disabled = false;
-                messageInput.focus();
-            }
+      try {
+        const res      = await fetch('http://localhost:8000/chat/sessions/');
+        const sessions = await res.json();
+        if (!sessions.length) {
+          list.innerHTML = `<p class="px-5 py-6 text-center text-xs text-on-surface-variant/40 font-label">No hay sesiones guardadas.</p>`;
+          return;
         }
+        list.innerHTML = sessions.map(s => {
+          const isActive = s.session_id === SESSION_ID;
+          const date     = new Date(s.updated_at).toLocaleString('es-AR');
+          const summary  = s.summary ? s.summary.substring(0, 80) + '…' : 'Sin resumen';
+          return `
+            <div id="si-${s.session_id}"
+              class="px-5 py-3 cursor-pointer transition-colors hover:bg-primary/5 ${isActive ? 'bg-primary/5' : ''}"
+              onclick="loadSession('${s.session_id}')">
+              <p class="font-headline font-bold text-[11px] text-primary">${isActive ? '▶ Sesión actual' : s.session_id}</p>
+              <p class="text-[10px] text-on-surface-variant/50 font-label mt-0.5">Usuario: ${s.user_id} · ${date}</p>
+              <p class="text-[11px] text-on-surface-variant/70 font-label mt-1 truncate">${summary}</p>
+              ${!isActive ? `
+              <div class="mt-2">
+                <button onclick="deleteSession(event,'${s.session_id}')"
+                  class="text-[10px] font-semibold font-label px-3 py-1 rounded-full transition-colors"
+                  style="background:rgba(186,26,26,0.08);color:#ba1a1a;">
+                  Eliminar
+                </button>
+              </div>` : ''}
+            </div>`;
+        }).join('');
+      } catch(e) {
+        list.innerHTML = `<p class="px-5 py-4 text-center text-xs text-on-surface-variant/40 font-label">Error al cargar sesiones.</p>`;
+      }
+    }
 
-        function addMessage(text, role, agent = '') {
-            const msgDiv = document.createElement('div');
-            msgDiv.className = `message ${role}`;
+    async function loadSession(sessionId) {
+      if (sessionId === SESSION_ID) { document.getElementById('sessionsPanel').style.display = 'none'; return; }
+      localStorage.setItem('session_id', sessionId); location.reload();
+    }
 
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'message-content';
+    async function deleteSession(event, sessionId) {
+      event.stopPropagation();
+      if (!confirm('¿Eliminar esta sesión permanentemente?')) return;
+      try {
+        const res = await fetch(`http://localhost:8000/chat/sessions/${sessionId}`, { method: 'DELETE' });
+        if (res.ok) {
+          document.getElementById(`si-${sessionId}`)?.remove();
+          const list = document.getElementById('sessionsList');
+          if (!list.children.length)
+            list.innerHTML = `<p class="px-5 py-6 text-center text-xs text-on-surface-variant/40 font-label">No hay sesiones guardadas.</p>`;
+        } else { alert('Error al eliminar la sesión.'); }
+      } catch(e) { alert('Error de conexión.'); }
+    }
 
-            if (role === 'bot') {
-                contentDiv.innerHTML = marked.parse(text);
-            } else {
-                contentDiv.textContent = text;
-            }
+    document.addEventListener('click', e => {
+      const panel = document.getElementById('sessionsPanel');
+      if (panel.style.display === 'block'
+        && !panel.contains(e.target)
+        && !e.target.closest('button[onclick*="toggleSessions"]'))
+        panel.style.display = 'none';
+    });
 
-            if (agent) {
-                const badge = document.createElement('div');
-                badge.className = 'agent-badge';
-                badge.textContent = `Agente: ${agent}`;
-                contentDiv.appendChild(badge);
-            }
-
-            msgDiv.appendChild(contentDiv);
-            messagesContainer.appendChild(msgDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    window.addEventListener('load', async () => {
+      try {
+        const msgsRes  = await fetch(`http://localhost:8000/chat/sessions/${SESSION_ID}/messages`);
+        const messages = await msgsRes.json();
+        if (messages && messages.length > 0) {
+          messages.forEach(m => addMessage(m.content, m.role === 'user' ? 'user' : 'bot', m.agent_type || ''));
+          return;
         }
-
-        function addTyping() {
-            const msgDiv = document.createElement('div');
-            msgDiv.className = 'message bot';
-            msgDiv.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
-            messagesContainer.appendChild(msgDiv);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            return msgDiv;
-        }
-
-        function newSession() {
-            if (confirm('¿Iniciar una nueva sesión? Podrás volver a esta desde "Sesiones".')) {
-                localStorage.removeItem('session_id');
-                location.reload();
-            }
-        }
-
-        async function toggleSessions() {
-            const panel = document.getElementById('sessionsPanel');
-            if (panel.style.display === 'block') {
-                panel.style.display = 'none';
-                return;
-            }
-            panel.style.display = 'block';
-            const list = document.getElementById('sessionsList');
-            list.innerHTML = '<div class="sessions-empty">Cargando...</div>';
-
-            try {
-                const res = await fetch('http://localhost:8000/chat/sessions/');
-                const sessions = await res.json();
-                if (!sessions.length) {
-                    list.innerHTML = '<div class="sessions-empty">No hay sesiones guardadas.</div>';
-                    return;
-                }
-                list.innerHTML = sessions.map(s => {
-                    const isActive = s.session_id === SESSION_ID;
-                    const date = new Date(s.updated_at).toLocaleString('es-AR');
-                    const summary = s.summary ? s.summary.substring(0, 80) + '...' : 'Sin resumen';
-                    return `<div class="session-item ${isActive ? 'active' : ''}" id="si-${s.session_id}">
-                        <div onclick="loadSession('${s.session_id}')">
-                            <div class="session-id">${isActive ? '▶ Sesión actual' : s.session_id}</div>
-                            <div class="session-meta">Usuario: ${s.user_id} · ${date}</div>
-                            <div class="session-summary">${summary}</div>
-                        </div>
-                        <div class="session-actions">
-                            ${!isActive ? `<button class="btn-delete-session" onclick="deleteSession(event, '${s.session_id}')">🗑 Eliminar</button>` : ''}
-                        </div>
-                    </div>`;
-                }).join('');
-            } catch (e) {
-                list.innerHTML = '<div class="sessions-empty">Error al cargar sesiones.</div>';
-            }
-        }
-
-        async function loadSession(sessionId) {
-            if (sessionId === SESSION_ID) {
-                document.getElementById('sessionsPanel').style.display = 'none';
-                return;
-            }
-            localStorage.setItem('session_id', sessionId);
-            location.reload();
-        }
-
-        async function deleteSession(event, sessionId) {
-            event.stopPropagation();
-            if (!confirm('¿Eliminar esta sesión permanentemente?')) return;
-            try {
-                const res = await fetch(`http://localhost:8000/chat/sessions/${sessionId}`, { method: 'DELETE' });
-                if (res.ok) {
-                    const el = document.getElementById(`si-${sessionId}`);
-                    if (el) el.remove();
-                    const list = document.getElementById('sessionsList');
-                    if (!list.children.length) {
-                        list.innerHTML = '<div class="sessions-empty">No hay sesiones guardadas.</div>';
-                    }
-                } else {
-                    alert('Error al eliminar la sesión.');
-                }
-            } catch (e) {
-                alert('Error de conexión.');
-            }
-        }
-
-        // Cerrar panel al hacer click fuera
-        document.addEventListener('click', (e) => {
-            const panel = document.getElementById('sessionsPanel');
-            if (!panel.contains(e.target) && !e.target.classList.contains('btn-sessions')) {
-                panel.style.display = 'none';
-            }
-        });
-
-        window.addEventListener('load', async () => {
-            try {
-                // Intentar cargar mensajes individuales
-                const msgsRes = await fetch(`http://localhost:8000/chat/sessions/${SESSION_ID}/messages`);
-                const messages = await msgsRes.json();
-
-                if (messages && messages.length > 0) {
-                    messages.forEach(m => {
-                        addMessage(m.content, m.role === 'user' ? 'user' : 'bot', m.agent_type || '');
-                    });
-                    return;
-                }
-
-                // Fallback: mostrar resumen si existe
-                const sessRes = await fetch('http://localhost:8000/chat/sessions/');
-                const sessions = await sessRes.json();
-                const current = sessions.find(s => s.session_id === SESSION_ID);
-
-                if (current && current.summary) {
-                    const date = new Date(current.updated_at).toLocaleString('es-AR');
-                    addMessage(`¡Hola de nuevo! Retomamos tu sesión del **${date}**.\n\n**Resumen:**\n${current.summary}`, 'bot');
-                } else {
-                    addMessage('¡Hola! Soy tu asistente de ventas. Ingresa tu Franchise ID arriba y pregúntame lo que necesites.', 'bot');
-                }
-            } catch (e) {
-                addMessage('¡Hola! Soy tu asistente de ventas. Ingresa tu Franchise ID arriba y pregúntame lo que necesites.', 'bot');
-            }
-        });
-    </script>
+        const sessRes  = await fetch('http://localhost:8000/chat/sessions/');
+        const sessions = await sessRes.json();
+        const current  = sessions.find(s => s.session_id === SESSION_ID);
+        if (current && current.summary) {
+          const date = new Date(current.updated_at).toLocaleString('es-AR');
+          addMessage(`¡Hola de nuevo! Retomamos tu sesión del **${date}**.\n\n**Resumen:**\n${current.summary}`, 'bot');
+        } else { showWelcome(); }
+      } catch(e) { showWelcome(); }
+    });
+  </script>
 </body>
 </html>

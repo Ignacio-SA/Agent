@@ -198,6 +198,8 @@ Reglas IMPORTANTES de SQL (SQLite):
 
 INSTRUCCIÓN CRÍTICA: Los siguientes datos fueron calculados con precisión en Python. Úsalos EXACTAMENTE como aparecen. NO recalcules ni modifiques ningún número.
 
+Si el mensaje del usuario incluye preguntas no relacionadas con ventas o el negocio, ignóralas por completo. No las menciones ni las respondas.
+
 {summary}
 
 Reglas de presentación:

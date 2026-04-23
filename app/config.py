@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Database
     db_server: str = os.getenv("DB_SERVER", "localhost")
-    db_database: str = os.getenv("DB_DATABASE", "chatbot_db")
+    db_name: str = os.getenv("DB_NAME", "chatbot_db")
     db_user: str = os.getenv("DB_USER", "")
     db_password: str = os.getenv("DB_PASSWORD", "")
     # Azure AD auth: "sql" | "activedirectoryinteractive" | "activedirectoryintegrated"
